@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -26,6 +26,7 @@ namespace WorldBuilder.Editors.Landscape.Commands {
         }
 
         public override string Description => _newRoad == 1 ? "Place road points" : "Remove road points";
+        public override TerrainField Field => TerrainField.Road;
 
         protected override byte GetEntryValue(TerrainEntry entry) => entry.Road;
 

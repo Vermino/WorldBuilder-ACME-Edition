@@ -1,4 +1,4 @@
-﻿using DatReaderWriter.Enums;
+using DatReaderWriter.Enums;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -18,6 +18,7 @@ namespace WorldBuilder.Editors.Landscape.Commands {
         }
 
         public override string Description => "Draw road line";
+        public override TerrainField Field => TerrainField.Road;
 
         protected override byte GetEntryValue(TerrainEntry entry) => entry.Road;
 

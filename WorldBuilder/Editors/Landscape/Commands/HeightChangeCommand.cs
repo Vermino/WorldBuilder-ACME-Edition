@@ -20,6 +20,7 @@ namespace WorldBuilder.Editors.Landscape.Commands {
         }
 
         public override string Description => _description;
+        public override TerrainField Field => TerrainField.Height;
 
         protected override byte GetEntryValue(TerrainEntry entry) => entry.Height;
         protected override TerrainEntry SetEntryValue(TerrainEntry entry, byte value) => entry with { Height = value };

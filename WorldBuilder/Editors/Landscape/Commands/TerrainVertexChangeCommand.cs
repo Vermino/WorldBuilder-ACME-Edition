@@ -19,6 +19,7 @@ namespace WorldBuilder.Editors.Landscape.Commands {
         private Dictionary<ushort, List<(int ObjectIndex, float OriginalZ, float NewZ)>>? _staticObjectChanges;
 
         public abstract string Description { get; }
+        public abstract TerrainField Field { get; }
         public bool CanExecute => true;
         public bool CanUndo => true;
 
@@ -65,7 +66,7 @@ namespace WorldBuilder.Editors.Landscape.Commands {
             }
 
             // Single batch update with all changes
-            var modifiedLandblocks = _context.TerrainSystem.UpdateLandblocksBatch(batchChanges);
+            var modifiedLandblocks = _context.TerrainSystem.UpdateLandblocksBatch(Field, batchChanges);
             _context.MarkLandblocksModified(modifiedLandblocks);
 
             // On first execution, compute how static objects should move with the terrain

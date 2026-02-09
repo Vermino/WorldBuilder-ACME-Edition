@@ -1,4 +1,4 @@
-﻿using DatReaderWriter.Enums;
+using DatReaderWriter.Enums;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -24,6 +24,7 @@ namespace WorldBuilder.Editors.Landscape.Commands {
         }
 
         public override string Description => $"Paint {Enum.GetName(typeof(TerrainTextureType), _terrainType)}";
+        public override TerrainField Field => TerrainField.Type;
 
         protected override byte GetEntryValue(TerrainEntry entry) => entry.Type;
         protected override TerrainEntry SetEntryValue(TerrainEntry entry, byte value) => entry with { Type = value };
