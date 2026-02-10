@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
@@ -106,6 +107,7 @@ namespace WorldBuilder.Shared.Documents {
 
             // Track which StaticObjects have been matched to an original building
             var consumed = new HashSet<int>();
+            var originalNumCells = lbi.NumCells;
 
             // For each original building, try to find a matching StaticObject.
             // If found: update the building's position (preserving portal/cell data).
@@ -135,10 +137,23 @@ namespace WorldBuilder.Shared.Documents {
                     var matched = _data.StaticObjects[bestIdx];
                     var newLocal = ReverseOffset(matched.Origin, lbId);
                     var oldLocal = building.Frame.Origin;
+                    var oldRotation = building.Frame.Orientation;
 
-                    if (Vector3.Distance(newLocal, oldLocal) > 0.1f) {
+                    var hasMoved = Vector3.Distance(newLocal, oldLocal) > 0.01f;
+                    // Quaternion dot of 1.0 means identical; allow small float precision tolerance
+                    var dotProduct = Math.Abs(Quaternion.Dot(matched.Orientation, oldRotation));
+                    var hasRotated = dotProduct < 0.9999f;
+
+                    if (hasMoved || hasRotated) {
                         _logger.LogInformation("[LBDoc]   Building 0x{Id:X8} MOVED: ({OldX:F1},{OldY:F1},{OldZ:F1}) -> ({NewX:F1},{NewY:F1},{NewZ:F1})",
                             building.ModelId, oldLocal.X, oldLocal.Y, oldLocal.Z, newLocal.X, newLocal.Y, newLocal.Z);
+
+                        // Discover and move all EnvCells belonging to this building
+                        var cellIds = CollectBuildingCellIds(building, datwriter, lbId);
+                        if (cellIds.Count > 0) {
+                            _logger.LogInformation("[LBDoc]     Found {CellCount} EnvCells for building 0x{Id:X8}", cellIds.Count, building.ModelId);
+                            MoveBuildingEnvCells(cellIds, datwriter, lbId, oldLocal, oldRotation, newLocal, matched.Orientation, iteration);
+                        }
                     }
 
                     building.Frame = new Frame {
@@ -148,12 +163,25 @@ namespace WorldBuilder.Shared.Documents {
                     survivingBuildings.Add(building);
                 }
                 else {
-                    _logger.LogInformation("[LBDoc]   Building 0x{Id:X8} DELETED (no matching StaticObject)", building.ModelId);
+                    // Building was deleted -- count its EnvCells for NumCells adjustment
+                    var deletedCellIds = CollectBuildingCellIds(building, datwriter, lbId);
+                    if (deletedCellIds.Count > 0) {
+                        _logger.LogInformation("[LBDoc]   Building 0x{Id:X8} DELETED — {CellCount} EnvCells orphaned (will be cleaned up in Phase 2)",
+                            building.ModelId, deletedCellIds.Count);
+                        lbi.NumCells -= (uint)deletedCellIds.Count;
+                    }
+                    else {
+                        _logger.LogInformation("[LBDoc]   Building 0x{Id:X8} DELETED (no EnvCells)", building.ModelId);
+                    }
                 }
             }
 
             lbi.Buildings.Clear();
             lbi.Buildings.AddRange(survivingBuildings);
+
+            if (lbi.NumCells != originalNumCells) {
+                _logger.LogInformation("[LBDoc]   NumCells adjusted: {Old} -> {New}", originalNumCells, lbi.NumCells);
+            }
 
             // All non-consumed StaticObjects become regular Stab entries
             lbi.Objects.Clear();
@@ -186,6 +214,116 @@ namespace WorldBuilder.Shared.Documents {
             var blockX = (lbId >> 8) & 0xFF;
             var blockY = lbId & 0xFF;
             return new Vector3(worldPos.X - blockX * 192f, worldPos.Y - blockY * 192f, worldPos.Z);
+        }
+
+        /// <summary>
+        /// Returns true if a cell ID is in the valid EnvCell range (0x0100-0xFFFD).
+        /// Excludes outdoor LandCells (0x0001-0x0040), LandBlockInfo (0xFFFE), and LandBlock (0xFFFF).
+        /// </summary>
+        private static bool IsEnvCellId(ushort cellId) => cellId >= 0x0100 && cellId <= 0xFFFD;
+
+        /// <summary>
+        /// Walks a building's portal graph to collect all EnvCell IDs (the CCCC portion, 0x0100-0xFFFD)
+        /// that belong to this building. Starts from BuildingPortal.OtherCellId and StabList,
+        /// then follows CellPortal links in each discovered EnvCell.
+        /// </summary>
+        private HashSet<ushort> CollectBuildingCellIds(BuildingInfo building, IDatReaderWriter datAccess, uint lbId) {
+            var cellIds = new HashSet<ushort>();
+            var toVisit = new Queue<ushort>();
+
+            // Seed from building portals
+            foreach (var portal in building.Portals) {
+                if (IsEnvCellId(portal.OtherCellId) && cellIds.Add(portal.OtherCellId))
+                    toVisit.Enqueue(portal.OtherCellId);
+
+                foreach (var stab in portal.StabList) {
+                    if (IsEnvCellId(stab) && cellIds.Add(stab))
+                        toVisit.Enqueue(stab);
+                }
+            }
+
+            // BFS: follow CellPortal links to discover connected cells
+            while (toVisit.Count > 0) {
+                var cellNum = toVisit.Dequeue();
+                uint fullCellId = (lbId << 16) | cellNum;
+
+                if (datAccess.TryGet<EnvCell>(fullCellId, out var envCell)) {
+                    foreach (var cp in envCell.CellPortals) {
+                        if (IsEnvCellId(cp.OtherCellId) && cellIds.Add(cp.OtherCellId))
+                            toVisit.Enqueue(cp.OtherCellId);
+                    }
+                }
+            }
+
+            return cellIds;
+        }
+
+        /// <summary>
+        /// Moves all EnvCells belonging to a building by applying a position delta and rotation delta.
+        /// Each EnvCell's Position is in landblock-local space, same as the building's Frame.
+        /// </summary>
+        private void MoveBuildingEnvCells(
+            HashSet<ushort> cellIds,
+            IDatReaderWriter datAccess,
+            uint lbId,
+            Vector3 oldBuildingOrigin,
+            Quaternion oldBuildingRotation,
+            Vector3 newBuildingOrigin,
+            Quaternion newBuildingRotation,
+            int iteration) {
+
+            var positionDelta = newBuildingOrigin - oldBuildingOrigin;
+            var rotationDelta = newBuildingRotation * Quaternion.Inverse(oldBuildingRotation);
+            var hasRotation = Math.Abs(Quaternion.Dot(rotationDelta, Quaternion.Identity) - 1.0f) > 0.0001f;
+
+            foreach (var cellNum in cellIds) {
+                uint fullCellId = (lbId << 16) | cellNum;
+
+                if (!datAccess.TryGet<EnvCell>(fullCellId, out var envCell)) {
+                    _logger.LogWarning("[LBDoc]     EnvCell 0x{CellId:X8} not found in dat, skipping", fullCellId);
+                    continue;
+                }
+
+                if (hasRotation) {
+                    // Rotate the cell's position around the building's old origin, then translate
+                    var relativePos = envCell.Position.Origin - oldBuildingOrigin;
+                    var rotatedPos = Vector3.Transform(relativePos, rotationDelta);
+                    envCell.Position.Origin = newBuildingOrigin + rotatedPos;
+
+                    // Compose rotation deltas for the cell's own orientation
+                    envCell.Position.Orientation = Quaternion.Normalize(rotationDelta * envCell.Position.Orientation);
+
+                    // Also transform static objects inside the cell (landblock-local coords)
+                    foreach (var stab in envCell.StaticObjects) {
+                        var relObj = stab.Frame.Origin - oldBuildingOrigin;
+                        var rotObj = Vector3.Transform(relObj, rotationDelta);
+                        stab.Frame = new Frame {
+                            Origin = newBuildingOrigin + rotObj,
+                            Orientation = Quaternion.Normalize(rotationDelta * stab.Frame.Orientation)
+                        };
+                    }
+                }
+                else {
+                    // Translation only -- just shift the origin
+                    envCell.Position.Origin += positionDelta;
+
+                    // Also shift static objects inside the cell (landblock-local coords)
+                    foreach (var stab in envCell.StaticObjects) {
+                        stab.Frame = new Frame {
+                            Origin = stab.Frame.Origin + positionDelta,
+                            Orientation = stab.Frame.Orientation
+                        };
+                    }
+                }
+
+                if (!datAccess.TrySave(envCell, iteration)) {
+                    _logger.LogError("[LBDoc]     FAILED to save EnvCell 0x{CellId:X8}", fullCellId);
+                }
+                else {
+                    _logger.LogInformation("[LBDoc]     Moved EnvCell 0x{CellId:X8} to ({X:F1},{Y:F1},{Z:F1})",
+                        fullCellId, envCell.Position.Origin.X, envCell.Position.Origin.Y, envCell.Position.Origin.Z);
+                }
+            }
         }
 
         public bool Apply(BaseDocumentEvent evt) {

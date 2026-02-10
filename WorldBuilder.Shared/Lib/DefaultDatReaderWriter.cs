@@ -30,6 +30,7 @@ namespace WorldBuilder.Shared.Lib {
                 return typeof(T) switch {
                     Type _ when typeof(T) == typeof(LandBlock) => Dats.Cell.TryGet(id, out file),
                     Type _ when typeof(T) == typeof(LandBlockInfo) => Dats.Cell.TryGet(id, out file),
+                    Type _ when typeof(T) == typeof(EnvCell) => Dats.Cell.TryGet(id, out file),
                     Type _ when typeof(T) == typeof(Setup) => Dats.Portal.TryGet(id, out file),
                     Type _ when typeof(T) == typeof(GfxObj) => Dats.Portal.TryGet(id, out file),
                     Type _ when typeof(T) == typeof(Region) => Dats.Portal.TryGet(id, out file),
@@ -49,6 +50,7 @@ namespace WorldBuilder.Shared.Lib {
                 return typeof(T) switch {
                     Type _ when typeof(T) == typeof(LandBlock) => Dats.Cell.TryWriteFile(file, iteration),
                     Type _ when typeof(T) == typeof(LandBlockInfo) => Dats.Cell.TryWriteFile(file, iteration),
+                    Type _ when typeof(T) == typeof(EnvCell) => Dats.Cell.TryWriteFile(file, iteration),
                     Type _ when typeof(T) == typeof(Setup) => Dats.Portal.TryWriteFile(file, iteration),
                     Type _ when typeof(T) == typeof(GfxObj) => Dats.Portal.TryWriteFile(file, iteration),
                     Type _ when typeof(T) == typeof(Region) => Dats.Portal.TryWriteFile(file, iteration),
