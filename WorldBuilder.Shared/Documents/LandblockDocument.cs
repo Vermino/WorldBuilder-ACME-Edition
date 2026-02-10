@@ -183,16 +183,42 @@ namespace WorldBuilder.Shared.Documents {
                 _logger.LogInformation("[LBDoc]   NumCells adjusted: {Old} -> {New}", originalNumCells, lbi.NumCells);
             }
 
-            // All non-consumed StaticObjects become regular Stab entries
+            // Non-consumed StaticObjects: check for new buildings, rest become Stab entries
             lbi.Objects.Clear();
             for (int i = 0; i < _data.StaticObjects.Count; i++) {
                 if (consumed.Contains(i)) continue;
 
                 var obj = _data.StaticObjects[i];
+                var localOrigin = ReverseOffset(obj.Origin, lbId);
+
+                // Check if this is a known building model — if so, instantiate with EnvCells
+                if (BuildingBlueprintCache.IsBuildingModelId(obj.Id, datwriter)) {
+                    var blueprint = BuildingBlueprintCache.GetBlueprint(obj.Id, datwriter, _logger);
+                    if (blueprint != null) {
+                        var result = BuildingBlueprintCache.InstantiateBlueprint(
+                            blueprint, localOrigin, obj.Orientation,
+                            lbId, lbi.NumCells, datwriter, iteration, _logger);
+
+                        if (result.HasValue) {
+                            lbi.Buildings.Add(result.Value.building);
+                            lbi.NumCells += (uint)result.Value.cellCount;
+                            _logger.LogInformation("[LBDoc]   NEW building 0x{Id:X8} placed with {CellCount} EnvCells",
+                                obj.Id, result.Value.cellCount);
+                            continue; // Don't add as Stab
+                        }
+                        else {
+                            _logger.LogWarning("[LBDoc]   Failed to instantiate building 0x{Id:X8}, adding as regular object", obj.Id);
+                        }
+                    }
+                    else {
+                        _logger.LogWarning("[LBDoc]   No blueprint found for building 0x{Id:X8}, adding as regular object", obj.Id);
+                    }
+                }
+
                 lbi.Objects.Add(new Stab {
                     Id = obj.Id,
                     Frame = new Frame {
-                        Origin = ReverseOffset(obj.Origin, lbId),
+                        Origin = localOrigin,
                         Orientation = obj.Orientation
                     }
                 });
