@@ -236,11 +236,47 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                     int lbY = (int)Math.Floor(terrainPos.Y / 192f);
                     ushort lbKey = (ushort)((lbX << 8) | lbY);
 
+                    // Clamp building position so the entire model stays within a single landblock.
+                    // AC requires all EnvCells to be in the same landblock as the building.
+                    // If the model extends past a landblock boundary, physics breaks on that side.
+                    // Clamp building position so the entire building (including its physics BSP,
+                    // which extends well beyond the visual mesh) stays within a single landblock.
+                    // AC buildings' physics collision BSPs can extend 30+ units from their origin.
+                    // Original AC buildings are placed with ~36+ units clearance from landblock edges.
+                    // We use a conservative minimum clearance to ensure the physics works correctly.
+                    var placementPos = terrainPos;
+                    {
+                        const float minEdgeClearance = 36f; // Based on original AC building placement patterns
+
+                        float lbOriginX = lbX * 192f;
+                        float lbOriginY = lbY * 192f;
+                        float localX = placementPos.X - lbOriginX;
+                        float localY = placementPos.Y - lbOriginY;
+
+                        localX = Math.Clamp(localX, minEdgeClearance, 192f - minEdgeClearance);
+                        localY = Math.Clamp(localY, minEdgeClearance, 192f - minEdgeClearance);
+
+                        placementPos = new Vector3(lbOriginX + localX, lbOriginY + localY, placementPos.Z);
+                    }
+
+                    // For building models, use the donor building's orientation as the default.
+                    // The building's interior cell geometry (CellStructure from Environment data)
+                    // is authored for a specific orientation. Using identity rotation misaligns
+                    // the physics BSP with the visual mesh, causing walk-through walls.
+                    var orientation = preview.Orientation;
+                    var datsForOrientation = Context.TerrainSystem.Dats;
+                    if (datsForOrientation != null && BuildingBlueprintCache.IsBuildingModelId(preview.Id, datsForOrientation)) {
+                        var blueprint = BuildingBlueprintCache.GetBlueprint(preview.Id, datsForOrientation);
+                        if (blueprint != null) {
+                            orientation = blueprint.DonorOrientation;
+                        }
+                    }
+
                     var newObj = new StaticObject {
                         Id = preview.Id,
                         IsSetup = preview.IsSetup,
-                        Origin = terrainPos,
-                        Orientation = preview.Orientation,
+                        Origin = placementPos,
+                        Orientation = orientation,
                         Scale = preview.Scale
                     };
 
@@ -318,52 +354,47 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                 float worldMinY = obj.Origin.Y + localMin.Y;
                 float worldMaxY = obj.Origin.Y + localMax.Y;
 
-                // Expand footprint using blueprint EnvCell positions (covers full interior extent)
-                var dats = Context.TerrainSystem.Dats;
-                if (dats != null) {
-                    var blueprint = BuildingBlueprintCache.GetBlueprint(obj.Id, dats);
-                    if (blueprint != null && blueprint.Cells.Count > 0) {
-                        foreach (var cell in blueprint.Cells) {
-                            // Transform cell's local offset by building orientation to get world offset
-                            var worldOffset = Vector3.Transform(cell.RelativeOrigin, obj.Orientation);
-                            float cellX = obj.Origin.X + worldOffset.X;
-                            float cellY = obj.Origin.Y + worldOffset.Y;
-                            // Expand bounds to include this cell (with margin for cell geometry)
-                            // AC cells can be up to ~24m across, use full cell width as margin
-                            const float cellMargin = 24f;
-                            worldMinX = Math.Min(worldMinX, cellX - cellMargin);
-                            worldMaxX = Math.Max(worldMaxX, cellX + cellMargin);
-                            worldMinY = Math.Min(worldMinY, cellY - cellMargin);
-                            worldMaxY = Math.Max(worldMaxY, cellY + cellMargin);
-                        }
-                    }
-                }
+                // Add a small margin around the model bounds for terrain smoothing.
+                // We no longer expand by EnvCell positions with 24m margins -- that created
+                // a footprint spanning many landblocks. The model bounds + a reasonable margin
+                // covers the actual building footprint where terrain needs flattening.
+                const float flattenMargin = 6f;
+                worldMinX -= flattenMargin;
+                worldMaxX += flattenMargin;
+                worldMinY -= flattenMargin;
+                worldMaxY += flattenMargin;
 
-                // Ensure minimum footprint of at least 24m around building center
-                const float minRadius = 24f;
-                worldMinX = Math.Min(worldMinX, obj.Origin.X - minRadius);
-                worldMaxX = Math.Max(worldMaxX, obj.Origin.X + minRadius);
-                worldMinY = Math.Min(worldMinY, obj.Origin.Y - minRadius);
-                worldMaxY = Math.Max(worldMaxY, obj.Origin.Y + minRadius);
-
-                // Find the target height byte by reverse-lookup in the height table
                 var heightTable = Context.TerrainSystem.Region.LandDefs.LandHeightTable;
-                byte targetHeight = FindClosestHeightByte(heightTable, obj.Origin.Z);
 
                 // Get all terrain vertices in the rectangular footprint
                 var vertices = PaintCommand.GetVerticesInRect(worldMinX, worldMinY, worldMaxX, worldMaxY, Context);
                 if (vertices.Count == 0) return null;
 
-                // Build change set (same pattern as HeightSetSubToolViewModel)
-                var changes = new Dictionary<ushort, List<(int VertexIndex, byte OriginalValue, byte NewValue)>>();
+                // Find the MAXIMUM height byte among all vertices in the footprint.
+                // Flattening to the max ensures terrain is only raised, never lowered,
+                // so the building sits ON the terrain without its base going below ground.
                 var landblockDataCache = new Dictionary<ushort, TerrainEntry[]>();
-
+                byte maxHeight = 0;
                 foreach (var (lbId, vIndex, _) in vertices) {
                     if (!landblockDataCache.TryGetValue(lbId, out var data)) {
                         data = Context.TerrainSystem.GetLandblockTerrain(lbId);
                         if (data == null) continue;
                         landblockDataCache[lbId] = data;
                     }
+                    byte h = data[vIndex].Height;
+                    if (h > maxHeight) maxHeight = h;
+                }
+
+                // Use the higher of: the max vertex height or the placement click height.
+                // This handles both slopes (use max vertex) and valleys (use click height).
+                byte clickHeight = FindClosestHeightByte(heightTable, obj.Origin.Z);
+                byte targetHeight = Math.Max(maxHeight, clickHeight);
+
+                // Build change set
+                var changes = new Dictionary<ushort, List<(int VertexIndex, byte OriginalValue, byte NewValue)>>();
+
+                foreach (var (lbId, vIndex, _) in vertices) {
+                    if (!landblockDataCache.TryGetValue(lbId, out var data)) continue;
 
                     if (!changes.TryGetValue(lbId, out var list)) {
                         list = new List<(int, byte, byte)>();
@@ -378,6 +409,15 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                 }
 
                 if (changes.Count == 0) return heightTable[targetHeight];
+
+                // Snapshot original terrain data before applying changes, so we can compute
+                // height deltas for nearby static objects afterward.
+                var originalDataSnapshots = new Dictionary<ushort, TerrainEntry[]>();
+                foreach (var (lbId, _) in changes) {
+                    if (landblockDataCache.TryGetValue(lbId, out var data)) {
+                        originalDataSnapshots[lbId] = (TerrainEntry[])data.Clone();
+                    }
+                }
 
                 // Apply terrain changes directly (without HeightChangeCommand's static object Z adjustment,
                 // which would cause nearby existing buildings to float/sink)
@@ -396,8 +436,18 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                 var modifiedLandblocks = Context.TerrainSystem.UpdateLandblocksBatch(TerrainField.Height, batchChanges);
                 Context.MarkLandblocksModified(modifiedLandblocks);
 
-                Console.WriteLine($"[Selector] Flattened {vertices.Count} terrain vertices under building 0x{obj.Id:X8} (height={heightTable[targetHeight]:F1})");
-                return heightTable[targetHeight];
+                // Adjust Z of nearby non-building static objects to preserve their offset
+                // from the terrain surface. Buildings are excluded to avoid shifting them.
+                AdjustNearbyObjectHeights(changes, originalDataSnapshots, heightTable, obj);
+
+                // Re-sample the interpolated terrain height at the exact building position
+                // after flattening, rather than using the raw height table value.
+                // This accounts for edge effects where the building straddles flattened
+                // and non-flattened vertices, matching how the AC client computes height.
+                float interpolatedZ = Context.GetHeightAtPosition(obj.Origin.X, obj.Origin.Y);
+
+                Console.WriteLine($"[Selector] Flattened {vertices.Count} terrain vertices under building 0x{obj.Id:X8} (tableHeight={heightTable[targetHeight]:F1}, interpolatedZ={interpolatedZ:F2})");
+                return interpolatedZ;
             }
             catch (Exception ex) {
                 Console.WriteLine($"[Selector] Error flattening terrain: {ex.Message}");
@@ -419,6 +469,73 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                 }
             }
             return best;
+        }
+
+        /// <summary>
+        /// After terrain flattening, adjusts the Z of ALL nearby static objects (including
+        /// existing buildings) to preserve their offset from the terrain surface. Only the
+        /// building being placed right now is skipped (its Z is set explicitly afterward).
+        /// Existing buildings ARE adjusted -- at export time, SaveToDatsInternal detects the
+        /// position change and MoveBuildingEnvCells correctly repositions the interior cells.
+        /// </summary>
+        private void AdjustNearbyObjectHeights(
+            Dictionary<ushort, List<(int VertexIndex, byte OriginalValue, byte NewValue)>> changes,
+            Dictionary<ushort, TerrainEntry[]> originalDataSnapshots,
+            float[] heightTable,
+            StaticObject placedBuilding) {
+
+            var docManager = Context.TerrainSystem.DocumentManager;
+            int totalAdjusted = 0;
+
+            foreach (var lbId in changes.Keys) {
+                if (!originalDataSnapshots.TryGetValue(lbId, out var originalData)) continue;
+
+                var newData = Context.TerrainSystem.GetLandblockTerrain(lbId);
+                if (newData == null) continue;
+
+                var docId = $"landblock_{lbId:X4}";
+                var doc = docManager.GetOrCreateDocumentAsync<LandblockDocument>(docId).GetAwaiter().GetResult();
+                if (doc == null || doc.StaticObjectCount == 0) continue;
+
+                uint landblockX = (uint)(lbId >> 8) & 0xFF;
+                uint landblockY = (uint)(lbId & 0xFF);
+                float baseLbX = landblockX * 192f;
+                float baseLbY = landblockY * 192f;
+
+                for (int i = 0; i < doc.StaticObjectCount; i++) {
+                    var obj = doc.GetStaticObject(i);
+
+                    // Skip only the building we are placing right now -- its Z will be set
+                    // explicitly by the caller after this method returns.
+                    if (obj.Id == placedBuilding.Id &&
+                        Vector3.Distance(obj.Origin, placedBuilding.Origin) < 1.0f) {
+                        continue;
+                    }
+
+                    float localX = obj.Origin.X - baseLbX;
+                    float localY = obj.Origin.Y - baseLbY;
+
+                    // Skip objects outside this landblock's bounds
+                    if (localX < 0 || localX > 192f || localY < 0 || localY > 192f) continue;
+
+                    // Sample terrain height at object position using original and new data
+                    float oldTerrainZ = TerrainDataManager.SampleHeightTriangle(
+                        originalData, heightTable, localX, localY, landblockX, landblockY);
+                    float newTerrainZ = TerrainDataManager.SampleHeightTriangle(
+                        newData, heightTable, localX, localY, landblockX, landblockY);
+
+                    float delta = newTerrainZ - oldTerrainZ;
+                    if (Math.Abs(delta) < 0.001f) continue;
+
+                    // Preserve the object's offset from the terrain surface
+                    doc.SetStaticObjectHeight(i, obj.Origin.Z + delta);
+                    totalAdjusted++;
+                }
+            }
+
+            if (totalAdjusted > 0) {
+                Console.WriteLine($"[Selector] Adjusted Z of {totalAdjusted} nearby objects (incl. buildings) after terrain flattening");
+            }
         }
     }
 }
