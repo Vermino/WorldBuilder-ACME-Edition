@@ -44,6 +44,8 @@ namespace WorldBuilder.Shared.Lib {
     public class BuildingBlueprint {
         public uint ModelId;
         public uint NumLeaves;
+        /// <summary>The donor building's orientation, needed to rotate relative positions for new orientations.</summary>
+        public Quaternion DonorOrientation;
         public List<BuildingPortal> PortalTemplates = new();
         public List<EnvCellSnapshot> Cells = new();
         /// <summary>Maps original cell IDs to indices in the Cells list, for remapping.</summary>
@@ -177,26 +179,36 @@ namespace WorldBuilder.Shared.Lib {
         private static BuildingBlueprint? ExtractFromDonor(BuildingInfo donor, uint donorLbId, IDatReaderWriter dats, ILogger? logger) {
             var blueprint = new BuildingBlueprint {
                 ModelId = donor.ModelId,
-                NumLeaves = donor.NumLeaves
+                NumLeaves = donor.NumLeaves,
+                DonorOrientation = donor.Frame.Orientation
             };
 
             // Collect all EnvCell IDs belonging to this building (may be empty for exterior-only buildings)
             var cellIds = CollectBuildingCellIds(donor, dats, donorLbId);
 
             // Build the cell snapshots
+            // Store positions in donor-local space (undo donor rotation) so they can be
+            // re-applied with any new orientation during instantiation.
             var donorOrigin = donor.Frame.Origin;
+            var donorInverseRot = Quaternion.Inverse(donor.Frame.Orientation);
             int index = 0;
             foreach (var cellId in cellIds.OrderBy(c => c)) {
                 uint fullCellId = (donorLbId << 16) | cellId;
                 if (!dats.TryGet<EnvCell>(fullCellId, out var envCell)) continue;
+
+                // Transform world-relative offset into donor-local space
+                var worldOffset = envCell.Position.Origin - donorOrigin;
+                var localOffset = Vector3.Transform(worldOffset, donorInverseRot);
+                // Store orientation relative to donor
+                var localOrientation = Quaternion.Normalize(donorInverseRot * envCell.Position.Orientation);
 
                 var snapshot = new EnvCellSnapshot {
                     OriginalCellId = cellId,
                     Flags = envCell.Flags,
                     EnvironmentId = envCell.EnvironmentId,
                     CellStructure = envCell.CellStructure,
-                    RelativeOrigin = envCell.Position.Origin - donorOrigin,
-                    Orientation = envCell.Position.Orientation,
+                    RelativeOrigin = localOffset,
+                    Orientation = localOrientation,
                     RestrictionObj = envCell.RestrictionObj
                 };
 
@@ -216,12 +228,15 @@ namespace WorldBuilder.Shared.Lib {
                 // Copy visible cells (will be remapped during instantiation)
                 snapshot.VisibleCells.AddRange(envCell.VisibleCells);
 
-                // Copy static objects with relative positions
+                // Copy static objects in donor-local space
                 foreach (var stab in envCell.StaticObjects) {
+                    var stabWorldOffset = stab.Frame.Origin - donorOrigin;
+                    var stabLocalOffset = Vector3.Transform(stabWorldOffset, donorInverseRot);
+                    var stabLocalOrientation = Quaternion.Normalize(donorInverseRot * stab.Frame.Orientation);
                     snapshot.StaticObjects.Add(new StabSnapshot {
                         Id = stab.Id,
-                        RelativeOrigin = stab.Frame.Origin - donorOrigin,
-                        Orientation = stab.Frame.Orientation
+                        RelativeOrigin = stabLocalOffset,
+                        Orientation = stabLocalOrientation
                     });
                 }
 
@@ -266,9 +281,14 @@ namespace WorldBuilder.Shared.Lib {
             }
 
             // Create and save each new EnvCell
+            // Apply the new building's orientation to transform local-space offsets to world-space
             foreach (var cell in blueprint.Cells) {
                 var newCellId = remap[cell.OriginalCellId];
                 uint fullCellId = (lbId << 16) | newCellId;
+
+                // Rotate local-space offset by new building orientation, then translate
+                var worldOffset = Vector3.Transform(cell.RelativeOrigin, newOrientation);
+                var worldOrientation = Quaternion.Normalize(newOrientation * cell.Orientation);
 
                 var envCell = new EnvCell {
                     Id = fullCellId,
@@ -277,8 +297,8 @@ namespace WorldBuilder.Shared.Lib {
                     CellStructure = cell.CellStructure,
                     RestrictionObj = cell.RestrictionObj,
                     Position = new Frame {
-                        Origin = newOrigin + cell.RelativeOrigin,
-                        Orientation = cell.Orientation
+                        Origin = newOrigin + worldOffset,
+                        Orientation = worldOrientation
                     }
                 };
 
@@ -301,13 +321,15 @@ namespace WorldBuilder.Shared.Lib {
                     envCell.VisibleCells.Add(RemapCellId(vc, remap));
                 }
 
-                // Copy static objects with absolute positions
+                // Copy static objects with orientation-aware positions
                 foreach (var stab in cell.StaticObjects) {
+                    var stabWorldOffset = Vector3.Transform(stab.RelativeOrigin, newOrientation);
+                    var stabWorldOrientation = Quaternion.Normalize(newOrientation * stab.Orientation);
                     envCell.StaticObjects.Add(new Stab {
                         Id = stab.Id,
                         Frame = new Frame {
-                            Origin = newOrigin + stab.RelativeOrigin,
-                            Orientation = stab.Orientation
+                            Origin = newOrigin + stabWorldOffset,
+                            Orientation = stabWorldOrientation
                         }
                     });
                 }
