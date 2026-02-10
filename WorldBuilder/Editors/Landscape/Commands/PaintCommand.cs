@@ -53,6 +53,72 @@ namespace WorldBuilder.Editors.Landscape.Commands {
             }
         }
 
+        /// <summary>
+        /// Gets all terrain vertices within a world-space rectangle (min/max XY).
+        /// Handles edge neighbor syncing just like the circular version.
+        /// </summary>
+        public static List<(ushort LandblockId, int VertexIndex, Vector3 Position)> GetVerticesInRect(
+            float minX, float minY, float maxX, float maxY, TerrainEditingContext context) {
+            var affected = new List<(ushort, int, Vector3)>();
+            const float gridSpacing = 24f;
+            int mapSize = 255;
+
+            int minGX = (int)Math.Floor(minX / gridSpacing);
+            int maxGX = (int)Math.Ceiling(maxX / gridSpacing);
+            int minGY = (int)Math.Floor(minY / gridSpacing);
+            int maxGY = (int)Math.Ceiling(maxY / gridSpacing);
+
+            for (int gx = minGX; gx <= maxGX; gx++) {
+                for (int gy = minGY; gy <= maxGY; gy++) {
+                    if (gx < 0 || gy < 0) continue;
+                    int lbX = gx / 8;
+                    int lbY = gy / 8;
+                    if (lbX >= mapSize || lbY >= mapSize) continue;
+                    int localVX = gx - lbX * 8;
+                    int localVY = gy - lbY * 8;
+                    if (localVX < 0 || localVX > 8 || localVY < 0 || localVY > 8) continue;
+                    int vertexIndex = localVX * 9 + localVY;
+                    ushort lbId = (ushort)((lbX << 8) | lbY);
+                    Vector2 vert2D = new Vector2(gx * gridSpacing, gy * gridSpacing);
+                    float z = context.GetHeightAtPosition(vert2D.X, vert2D.Y);
+                    Vector3 vertPos = new Vector3(vert2D.X, vert2D.Y, z);
+                    affected.Add((lbId, vertexIndex, vertPos));
+
+                    // Edge neighbor handling (same as circular version)
+                    if (localVX == 0 && lbX > 0) {
+                        ushort leftLbId = (ushort)(((lbX - 1) << 8) | lbY);
+                        affected.Add((leftLbId, 8 * 9 + localVY, vertPos));
+                    }
+                    if (localVX == 8 && lbX < mapSize - 1) {
+                        ushort rightLbId = (ushort)(((lbX + 1) << 8) | lbY);
+                        affected.Add((rightLbId, 0 * 9 + localVY, vertPos));
+                    }
+                    if (localVY == 0 && lbY > 0) {
+                        ushort bottomLbId = (ushort)((lbX << 8) | (lbY - 1));
+                        affected.Add((bottomLbId, localVX * 9 + 8, vertPos));
+                    }
+                    if (localVY == 8 && lbY < mapSize - 1) {
+                        ushort topLbId = (ushort)((lbX << 8) | (lbY + 1));
+                        affected.Add((topLbId, localVX * 9 + 0, vertPos));
+                    }
+                    if (localVX == 0 && localVY == 0 && lbX > 0 && lbY > 0) {
+                        affected.Add(((ushort)(((lbX - 1) << 8) | (lbY - 1)), 8 * 9 + 8, vertPos));
+                    }
+                    if (localVX == 8 && localVY == 0 && lbX < mapSize - 1 && lbY > 0) {
+                        affected.Add(((ushort)(((lbX + 1) << 8) | (lbY - 1)), 0 * 9 + 8, vertPos));
+                    }
+                    if (localVX == 0 && localVY == 8 && lbX > 0 && lbY < mapSize - 1) {
+                        affected.Add(((ushort)(((lbX - 1) << 8) | (lbY + 1)), 8 * 9 + 0, vertPos));
+                    }
+                    if (localVX == 8 && localVY == 8 && lbX < mapSize - 1 && lbY < mapSize - 1) {
+                        affected.Add(((ushort)(((lbX + 1) << 8) | (lbY + 1)), 0 * 9 + 0, vertPos));
+                    }
+                }
+            }
+
+            return affected.Distinct().ToList();
+        }
+
         public static List<(ushort LandblockId, int VertexIndex, Vector3 Position)> GetAffectedVertices(
             Vector3 position, float radius, TerrainEditingContext context) {
             radius = (radius * 12f) + 1f;

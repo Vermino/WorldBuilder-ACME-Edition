@@ -1,12 +1,14 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using WorldBuilder.Editors.Landscape.Commands;
 using WorldBuilder.Lib;
 using WorldBuilder.Lib.History;
 using WorldBuilder.Shared.Documents;
+using WorldBuilder.Shared.Lib;
 
 namespace WorldBuilder.Editors.Landscape.ViewModels {
     public partial class SelectSubToolViewModel : SubToolViewModelBase {
@@ -248,6 +250,10 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                     Context.ObjectSelection.Select(newObj, lbKey, cmd.AddedIndex, false);
 
                     Console.WriteLine($"[Selector] Placed object 0x{newObj.Id:X8} at ({terrainPos.X:F1}, {terrainPos.Y:F1}, {terrainPos.Z:F1})");
+
+                    // Flatten terrain under building footprint
+                    FlattenTerrainUnderBuilding(newObj);
+
                     return true;
                 }
                 return false;
@@ -285,6 +291,85 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                 };
             }
             return false;
+        }
+
+        /// <summary>
+        /// Flattens terrain vertices under a building's footprint to the building's Z height.
+        /// Only applies to known building models. Uses the model's bounding box to determine
+        /// the rectangular footprint.
+        /// </summary>
+        private void FlattenTerrainUnderBuilding(StaticObject obj) {
+            try {
+                // Get model bounds from the object manager
+                var bounds = Context.TerrainSystem.Scene._objectManager.GetBounds(obj.Id, obj.IsSetup);
+                if (!bounds.HasValue) return;
+
+                var (localMin, localMax) = bounds.Value;
+
+                // Compute world-space AABB (ignoring rotation for V1)
+                float worldMinX = obj.Origin.X + localMin.X;
+                float worldMaxX = obj.Origin.X + localMax.X;
+                float worldMinY = obj.Origin.Y + localMin.Y;
+                float worldMaxY = obj.Origin.Y + localMax.Y;
+
+                // Find the target height byte by reverse-lookup in the height table
+                var heightTable = Context.TerrainSystem.Region.LandDefs.LandHeightTable;
+                byte targetHeight = FindClosestHeightByte(heightTable, obj.Origin.Z);
+
+                // Get all terrain vertices in the rectangular footprint
+                var vertices = PaintCommand.GetVerticesInRect(worldMinX, worldMinY, worldMaxX, worldMaxY, Context);
+                if (vertices.Count == 0) return;
+
+                // Build change set (same pattern as HeightSetSubToolViewModel)
+                var changes = new Dictionary<ushort, List<(int VertexIndex, byte OriginalValue, byte NewValue)>>();
+                var landblockDataCache = new Dictionary<ushort, TerrainEntry[]>();
+
+                foreach (var (lbId, vIndex, _) in vertices) {
+                    if (!landblockDataCache.TryGetValue(lbId, out var data)) {
+                        data = Context.TerrainSystem.GetLandblockTerrain(lbId);
+                        if (data == null) continue;
+                        landblockDataCache[lbId] = data;
+                    }
+
+                    if (!changes.TryGetValue(lbId, out var list)) {
+                        list = new List<(int, byte, byte)>();
+                        changes[lbId] = list;
+                    }
+
+                    if (list.Any(c => c.VertexIndex == vIndex)) continue;
+
+                    byte original = data[vIndex].Height;
+                    if (original == targetHeight) continue;
+                    list.Add((vIndex, original, targetHeight));
+                }
+
+                if (changes.Count == 0) return;
+
+                // Execute as a HeightChangeCommand (supports undo and handles static object Z adjustment)
+                var heightCmd = new HeightChangeCommand(Context, "Flatten terrain under building", changes);
+                _commandHistory.ExecuteCommand(heightCmd);
+
+                Console.WriteLine($"[Selector] Flattened {vertices.Count} terrain vertices under building 0x{obj.Id:X8}");
+            }
+            catch (Exception ex) {
+                Console.WriteLine($"[Selector] Error flattening terrain: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Finds the height byte (0-255) whose height table value is closest to the target Z.
+        /// </summary>
+        private static byte FindClosestHeightByte(float[] heightTable, float targetZ) {
+            byte best = 0;
+            float bestDist = float.MaxValue;
+            for (int i = 0; i < heightTable.Length && i < 256; i++) {
+                float dist = Math.Abs(heightTable[i] - targetZ);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = (byte)i;
+                }
+            }
+            return best;
         }
     }
 }
