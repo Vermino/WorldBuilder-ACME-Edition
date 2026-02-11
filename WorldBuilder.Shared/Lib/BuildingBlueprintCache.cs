@@ -48,6 +48,8 @@ namespace WorldBuilder.Shared.Lib {
         public Quaternion DonorOrientation;
         /// <summary>The landblock ID the donor building was extracted from, for byte-level comparison.</summary>
         public uint DonorLandblockId;
+        /// <summary>The donor building's landblock-local origin, needed to compute LandCell deltas for VisibleCells fixup.</summary>
+        public Vector3 DonorOrigin;
         public List<BuildingPortal> PortalTemplates = new();
         public List<EnvCellSnapshot> Cells = new();
         /// <summary>Maps original cell IDs to indices in the Cells list, for remapping.</summary>
@@ -183,7 +185,8 @@ namespace WorldBuilder.Shared.Lib {
                 ModelId = donor.ModelId,
                 NumLeaves = donor.NumLeaves,
                 DonorOrientation = donor.Frame.Orientation,
-                DonorLandblockId = donorLbId
+                DonorLandblockId = donorLbId,
+                DonorOrigin = donor.Frame.Origin
             };
 
             // Collect all EnvCell IDs belonging to this building (may be empty for exterior-only buildings).
@@ -351,6 +354,36 @@ namespace WorldBuilder.Shared.Lib {
                     envCell.VisibleCells.Add(RemapCellId(vc, remap));
                 }
 
+                // Fix up LandCell references in VisibleCells for the new building position.
+                // The donor's VisibleCells contain LandCell IDs (0x0001-0x0040) that are
+                // position-dependent outdoor cell references. When a building is placed at a
+                // different position than the donor, these stale references cause ACE's
+                // find_transit_cells to fail portal lookups — especially for buildings near
+                // outdoor cell boundaries, resulting in one-sided walk-through walls.
+                // We apply a 2D cell-coordinate delta (donor → new) to each LandCell reference
+                // to preserve the spatial relationship (e.g. "the cell one step north").
+                var (donorCellX, donorCellY) = PositionToOutdoorCell(blueprint.DonorOrigin);
+                var (newCellX, newCellY) = PositionToOutdoorCell(newOrigin);
+                int cellDeltaX = newCellX - donorCellX;
+                int cellDeltaY = newCellY - donorCellY;
+
+                for (int v = 0; v < envCell.VisibleCells.Count; v++) {
+                    var vc = envCell.VisibleCells[v];
+                    if (vc >= 0x0001 && vc <= 0x0040) {
+                        // Decompose donor LandCell ID → (cellX, cellY), apply delta, recompose
+                        var (vcCellX, vcCellY) = LandCellToXY(vc);
+                        int fixedX = Math.Clamp(vcCellX + cellDeltaX, 0, 7);
+                        int fixedY = Math.Clamp(vcCellY + cellDeltaY, 0, 7);
+                        ushort fixedLandCell = XYToLandCell(fixedX, fixedY);
+
+                        if (vc != fixedLandCell) {
+                            logger?.LogInformation("[Blueprint]     VisibleCell LandCell fixup: 0x{Old:X4} -> 0x{New:X4} (donor cell ({DX},{DY}) -> new cell ({NX},{NY}), delta ({DDX},{DDY}))",
+                                vc, fixedLandCell, donorCellX, donorCellY, newCellX, newCellY, cellDeltaX, cellDeltaY);
+                        }
+                        envCell.VisibleCells[v] = fixedLandCell;
+                    }
+                }
+
                 // Copy static objects with orientation-aware positions
                 foreach (var stab in cell.StaticObjects) {
                     var stabWorldOffset = Vector3.Transform(stab.RelativeOrigin, newOrientation);
@@ -465,6 +498,32 @@ namespace WorldBuilder.Shared.Lib {
         /// </summary>
         private static ushort RemapCellId(ushort cellId, Dictionary<ushort, ushort> remap) {
             return remap.TryGetValue(cellId, out var newId) ? newId : cellId;
+        }
+
+        /// <summary>
+        /// Converts a landblock-local position to the outdoor cell grid coordinates (0-7, 0-7).
+        /// Each outdoor cell is 24x24 units within a 192x192 landblock.
+        /// </summary>
+        private static (int cellX, int cellY) PositionToOutdoorCell(Vector3 localPos) {
+            int cellX = Math.Clamp((int)(localPos.X / 24f), 0, 7);
+            int cellY = Math.Clamp((int)(localPos.Y / 24f), 0, 7);
+            return (cellX, cellY);
+        }
+
+        /// <summary>
+        /// Decomposes a LandCell ID (0x0001-0x0040) into grid coordinates.
+        /// Formula: landCellId = cellX * 8 + cellY + 1
+        /// </summary>
+        private static (int cellX, int cellY) LandCellToXY(ushort landCellId) {
+            int id = landCellId - 1; // 0-based
+            return (id / 8, id % 8);
+        }
+
+        /// <summary>
+        /// Converts outdoor cell grid coordinates to a LandCell ID (0x0001-0x0040).
+        /// </summary>
+        private static ushort XYToLandCell(int cellX, int cellY) {
+            return (ushort)(cellX * 8 + cellY + 1);
         }
 
         /// <summary>

@@ -237,24 +237,30 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                     ushort lbKey = (ushort)((lbX << 8) | lbY);
 
                     // Clamp building position so the entire model stays within a single landblock.
-                    // AC requires all EnvCells to be in the same landblock as the building.
-                    // If the model extends past a landblock boundary, physics breaks on that side.
-                    // Clamp building position so the entire building (including its physics BSP,
-                    // which extends well beyond the visual mesh) stays within a single landblock.
-                    // AC buildings' physics collision BSPs can extend 30+ units from their origin.
-                    // Original AC buildings are placed with ~36+ units clearance from landblock edges.
-                    // We use a conservative minimum clearance to ensure the physics works correctly.
+                    // Snap building placement to the center of the nearest outdoor cell.
+                    // Each landblock has 8x8 outdoor cells of 24x24 units. ACE only checks
+                    // building collision for buildings registered in the player's current
+                    // outdoor cell. If the building's physics BSP extends past the 24x24
+                    // cell boundary, players in the adjacent cell get no collision check,
+                    // causing walk-through walls on that side. Original AC buildings are
+                    // always placed at outdoor cell centers (e.g., donor at local (36,156)
+                    // = (12,12) within cell (1,6) — perfectly centered).
+                    // We also clamp to avoid the outermost ring of cells (cells 0 and 7)
+                    // to maintain ~36-unit clearance from landblock edges.
                     var placementPos = terrainPos;
                     {
-                        const float minEdgeClearance = 36f; // Based on original AC building placement patterns
-
                         float lbOriginX = lbX * 192f;
                         float lbOriginY = lbY * 192f;
                         float localX = placementPos.X - lbOriginX;
                         float localY = placementPos.Y - lbOriginY;
 
-                        localX = Math.Clamp(localX, minEdgeClearance, 192f - minEdgeClearance);
-                        localY = Math.Clamp(localY, minEdgeClearance, 192f - minEdgeClearance);
+                        // Determine which outdoor cell the click falls in
+                        int cellX = Math.Clamp((int)(localX / 24f), 1, 6); // avoid edge cells 0 and 7
+                        int cellY = Math.Clamp((int)(localY / 24f), 1, 6);
+
+                        // Snap to the center of that outdoor cell
+                        localX = cellX * 24f + 12f;
+                        localY = cellY * 24f + 12f;
 
                         placementPos = new Vector3(lbOriginX + localX, lbOriginY + localY, placementPos.Z);
                     }
