@@ -181,6 +181,26 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         }
 
         [RelayCommand]
+        private void ResetCamera() {
+            if (TerrainSystem == null) return;
+
+            var camera = TerrainSystem.Scene.CameraManager.Current;
+            // Default: center of the map, looking down from above
+            var centerX = (TerrainDataManager.MapSize / 2f) * TerrainDataManager.LandblockLength;
+            var centerY = (TerrainDataManager.MapSize / 2f) * TerrainDataManager.LandblockLength;
+            var height = Math.Max(TerrainSystem.Scene.DataManager.GetHeightAtPosition(centerX, centerY), 100f);
+
+            if (camera is OrthographicTopDownCamera ortho) {
+                ortho.SetPosition(centerX, centerY, height + 1000f);
+                ortho.OrthographicSize = 1000f;
+            }
+            else if (camera is PerspectiveCamera persp) {
+                persp.SetPosition(centerX, centerY, height + 500f);
+                persp.LookAt(new Vector3(centerX, centerY, height));
+            }
+        }
+
+        [RelayCommand]
         public async Task GotoLandblock() {
             if (TerrainSystem == null) return;
 
