@@ -1,4 +1,4 @@
-﻿using Chorizite.Core.Render.Enums;
+using Chorizite.Core.Render.Enums;
 using Chorizite.Core.Render.Vertex;
 using Chorizite.OpenGLSDLBackend;
 using System;
@@ -201,6 +201,16 @@ namespace WorldBuilder.Editors.Landscape {
         }
 
         public bool HasRenderData(ulong chunkId) => _renderData.ContainsKey(chunkId);
+
+        /// <summary>
+        /// Disposes and removes GPU resources for a single chunk.
+        /// </summary>
+        public void DisposeChunkResources(ulong chunkId) {
+            if (_renderData.TryGetValue(chunkId, out var data)) {
+                data.Dispose();
+                _renderData.Remove(chunkId);
+            }
+        }
 
         public void Dispose() {
             foreach (var data in _renderData.Values) {

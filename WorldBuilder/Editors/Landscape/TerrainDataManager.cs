@@ -33,7 +33,20 @@ namespace WorldBuilder.Editors.Landscape {
         }
 
         /// <summary>
-        /// Determines which chunks should be loaded based on camera position
+        /// How many chunks to load around the camera in each direction.
+        /// With 16 landblocks/chunk at 192 units each, range 3 = ~9,216 units visibility.
+        /// </summary>
+        public uint LoadRange { get; set; } = 3;
+
+        /// <summary>
+        /// Chunks beyond this range (in chunk units) are eligible for unloading.
+        /// Should be >= LoadRange + 1 to avoid thrashing.
+        /// </summary>
+        public uint UnloadRange { get; set; } = 5;
+
+        /// <summary>
+        /// Determines which chunks should be loaded based on camera position.
+        /// Only loads chunks within LoadRange of the camera, not the entire map.
         /// </summary>
         public List<ulong> GetRequiredChunks(Vector3 cameraPosition) {
             var chunks = new List<ulong>();
@@ -41,14 +54,13 @@ namespace WorldBuilder.Editors.Landscape {
             var chunkX = (uint)Math.Max(0, Math.Min(MapSize / _chunkSizeInLandblocks - 1, cameraPosition.X / _metrics.WorldSize));
             var chunkY = (uint)Math.Max(0, Math.Min(MapSize / _chunkSizeInLandblocks - 1, cameraPosition.Y / _metrics.WorldSize));
 
-            var chunkRange = Math.Max(1u, MapSize / _chunkSizeInLandblocks);
             var maxChunksX = (MapSize + _chunkSizeInLandblocks - 1) / _chunkSizeInLandblocks;
             var maxChunksY = (MapSize + _chunkSizeInLandblocks - 1) / _chunkSizeInLandblocks;
 
-            var minX = (uint)Math.Max(0, (int)chunkX - chunkRange);
-            var maxX = Math.Min(maxChunksX - 1, chunkX + chunkRange);
-            var minY = (uint)Math.Max(0, (int)chunkY - chunkRange);
-            var maxY = Math.Min(maxChunksY - 1, chunkY + chunkRange);
+            var minX = (uint)Math.Max(0, (int)chunkX - LoadRange);
+            var maxX = Math.Min(maxChunksX - 1, chunkX + LoadRange);
+            var minY = (uint)Math.Max(0, (int)chunkY - LoadRange);
+            var maxY = Math.Min(maxChunksY - 1, chunkY + LoadRange);
 
             for (uint y = minY; y <= maxY; y++) {
                 for (uint x = minX; x <= maxX; x++) {
@@ -57,6 +69,32 @@ namespace WorldBuilder.Editors.Landscape {
             }
 
             return chunks;
+        }
+
+        /// <summary>
+        /// Returns chunk IDs that are loaded but beyond UnloadRange from the camera.
+        /// </summary>
+        public List<ulong> GetChunksToUnload(Vector3 cameraPosition) {
+            var toUnload = new List<ulong>();
+            var camChunkX = (int)(cameraPosition.X / _metrics.WorldSize);
+            var camChunkY = (int)(cameraPosition.Y / _metrics.WorldSize);
+
+            foreach (var (id, chunk) in _chunks) {
+                int dx = Math.Abs((int)chunk.ChunkX - camChunkX);
+                int dy = Math.Abs((int)chunk.ChunkY - camChunkY);
+                if (dx > UnloadRange || dy > UnloadRange) {
+                    toUnload.Add(id);
+                }
+            }
+
+            return toUnload;
+        }
+
+        /// <summary>
+        /// Removes a chunk from the data manager.
+        /// </summary>
+        public bool RemoveChunk(ulong chunkId) {
+            return _chunks.Remove(chunkId);
         }
 
         /// <summary>

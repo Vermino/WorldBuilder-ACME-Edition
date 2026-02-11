@@ -324,12 +324,13 @@ namespace WorldBuilder.Editors.Landscape {
             // Process any pending scenery regenerations (from terrain editing)
             ProcessPendingSceneryRegen();
 
-            // Check if we need to kick off new background loads
+            // Check if we need to kick off new background loads and unload distant data
             float distMoved = Vector3.Distance(cameraPosition, _lastDocUpdatePosition);
             if (distMoved >= DocUpdateDistanceThreshold || _lastDocUpdatePosition.X == float.MinValue) {
                 _lastDocUpdatePosition = cameraPosition;
                 KickOffBackgroundLoads(cameraPosition);
                 UnloadOutOfRangeLandblocks(cameraPosition);
+                UnloadDistantChunks(cameraPosition);
             }
 
             // Incrementally warm up GPU render data (a few per frame, on main thread for GL context)
@@ -513,6 +514,17 @@ namespace WorldBuilder.Editors.Landscape {
             // If there are more to unload, force re-check next frame
             if (toUnload.Count >= MaxUnloadsPerFrame) {
                 _lastDocUpdatePosition = new Vector3(float.MinValue);
+            }
+        }
+
+        /// <summary>
+        /// Unloads terrain chunks that are far from the camera to free GPU memory.
+        /// </summary>
+        private void UnloadDistantChunks(Vector3 cameraPosition) {
+            var chunksToUnload = DataManager.GetChunksToUnload(cameraPosition);
+            foreach (var chunkId in chunksToUnload) {
+                GPUManager.DisposeChunkResources(chunkId);
+                DataManager.RemoveChunk(chunkId);
             }
         }
 
@@ -944,15 +956,26 @@ namespace WorldBuilder.Editors.Landscape {
                 RenderActiveSpheres(editingContext, camera, model, viewProjection);
             }
 
-            // Render static objects
+            // Render static objects (frustum-culled)
             var renderSw = Stopwatch.StartNew();
-            var staticObjects = GetAllStaticObjects().ToList();
-            if (staticObjects.Count > 0) {
-                RenderStaticObjects(staticObjects, camera, viewProjection);
+            var allObjects = GetAllStaticObjects();
+            var visibleObjects = new List<StaticObject>();
+            foreach (var obj in allObjects) {
+                // Simple point-in-frustum test with a generous radius to account for object size
+                const float objectRadius = 50f;
+                var objBounds = new Chorizite.Core.Lib.BoundingBox(
+                    obj.Origin - new Vector3(objectRadius),
+                    obj.Origin + new Vector3(objectRadius));
+                if (frustum.IntersectsBoundingBox(objBounds)) {
+                    visibleObjects.Add(obj);
+                }
+            }
+            if (visibleObjects.Count > 0) {
+                RenderStaticObjects(visibleObjects, camera, viewProjection);
             }
             long renderStaticsMs = renderSw.ElapsedMilliseconds;
             if (renderStaticsMs > 200) {
-                Console.WriteLine($"[GameScene.Render] Static objects: {renderStaticsMs}ms ({staticObjects.Count} objects)");
+                Console.WriteLine($"[GameScene.Render] Static objects: {renderStaticsMs}ms ({visibleObjects.Count} objects)");
             }
 
             // Render selection highlight
