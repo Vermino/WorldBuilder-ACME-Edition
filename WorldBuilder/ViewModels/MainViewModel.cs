@@ -27,6 +27,13 @@ public partial class MainViewModel : ViewModelBase {
     }
 
     [RelayCommand]
+    private void Exit() {
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) {
+            desktop.Shutdown();
+        }
+    }
+
+    [RelayCommand]
     private void OpenSettingsWindow() {
         if (_settingsOpen) return;
 

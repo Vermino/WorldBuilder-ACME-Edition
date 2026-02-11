@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -18,7 +18,9 @@ namespace WorldBuilder.Lib {
     [JsonSerializable(typeof(CameraSettings))]
     [JsonSerializable(typeof(RenderingSettings))]
     [JsonSerializable(typeof(GridSettings))]
+    [JsonSerializable(typeof(OverlaySettings))]
     [JsonSerializable(typeof(SelectionSettings))]
+    [JsonSerializable(typeof(UIStateSettings))]
     [JsonSerializable(typeof(Vector3))]
     [JsonSerializable(typeof(DateTime))]
     [JsonSerializable(typeof(string))]

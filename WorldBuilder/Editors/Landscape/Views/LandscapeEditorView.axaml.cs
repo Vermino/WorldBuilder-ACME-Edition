@@ -27,6 +27,7 @@ public partial class LandscapeEditorView : Base3DView {
     private bool _isQPressedLastFrame;
     private LandscapeEditorViewModel? _viewModel;
     private ToolViewModelBase? _currentActiveTool => _viewModel?.SelectedTool;
+    private Avalonia.Controls.Grid? _mainGrid;
 
     public PixelSize CanvasSize { get; private set; }
 
@@ -43,6 +44,18 @@ public partial class LandscapeEditorView : Base3DView {
             ?? throw new Exception("Failed to get LandscapeEditorViewModel");
 
         DataContext = _viewModel;
+
+        // Cache grid reference on UI thread for later use from render thread
+        _mainGrid = this.FindControl<Avalonia.Controls.Grid>("MainGrid");
+
+        // Restore panel widths from settings (on UI thread)
+        var uiState = _viewModel?.Settings.Landscape.UIState;
+        if (uiState != null && _mainGrid != null) {
+            if (uiState.LeftPanelWidth > 0 && _mainGrid.ColumnDefinitions.Count > 0)
+                _mainGrid.ColumnDefinitions[0].Width = new Avalonia.Controls.GridLength(uiState.LeftPanelWidth);
+            if (uiState.RightPanelWidth > 0 && _mainGrid.ColumnDefinitions.Count > 4)
+                _mainGrid.ColumnDefinitions[4].Width = new Avalonia.Controls.GridLength(uiState.RightPanelWidth);
+        }
     }
 
     protected override void OnGlInit(GL gl, PixelSize canvasSize) {
@@ -513,6 +526,20 @@ public partial class LandscapeEditorView : Base3DView {
     }
 
     protected override void OnGlDestroy() {
+        // Save panel widths before cleanup (use cached grid, read values safely)
+        var uiState = _viewModel?.Settings.Landscape.UIState;
+        if (uiState != null && _mainGrid != null) {
+            try {
+                if (_mainGrid.ColumnDefinitions.Count > 0)
+                    uiState.LeftPanelWidth = _mainGrid.ColumnDefinitions[0].ActualWidth;
+                if (_mainGrid.ColumnDefinitions.Count > 4)
+                    uiState.RightPanelWidth = _mainGrid.ColumnDefinitions[4].ActualWidth;
+            }
+            catch {
+                // Column widths may not be accessible from this thread; ignore
+            }
+        }
+
         _currentActiveTool?.OnDeactivated();
         _viewModel?.Cleanup();
     }

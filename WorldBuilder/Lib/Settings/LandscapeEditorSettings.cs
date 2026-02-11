@@ -20,6 +20,9 @@ namespace WorldBuilder.Lib.Settings {
         private SelectionSettings _selection = new();
         public SelectionSettings Selection { get => _selection; set => SetProperty(ref _selection, value); }
 
+        private UIStateSettings _uiState = new();
+        public UIStateSettings UIState { get => _uiState; set => SetProperty(ref _uiState, value); }
+
         public LandscapeEditorSettings() {
         }
     }
@@ -53,6 +56,17 @@ namespace WorldBuilder.Lib.Settings {
         [SettingOrder(3)]
         private float _movementSpeed = 1000f;
         public float MovementSpeed { get => _movementSpeed; set => SetProperty(ref _movementSpeed, value); }
+
+        // Persisted camera state (not shown in settings UI -- no SettingDescription)
+        public float SavedPositionX { get; set; } = float.NaN;
+        public float SavedPositionY { get; set; } = float.NaN;
+        public float SavedPositionZ { get; set; } = float.NaN;
+        public float SavedYaw { get; set; } = float.NaN;
+        public float SavedPitch { get; set; } = float.NaN;
+        public float SavedOrthoSize { get; set; } = float.NaN;
+        public bool SavedIs3D { get; set; } = false;
+
+        public bool HasSavedPosition => !float.IsNaN(SavedPositionX);
     }
 
     [SettingCategory("Rendering", ParentCategory = "Landscape Editor", Order = 1)]
@@ -152,5 +166,19 @@ namespace WorldBuilder.Lib.Settings {
         [SettingOrder(1)]
         private float _sphereRadius = 4.6f;
         public float SphereRadius { get => _sphereRadius; set => SetProperty(ref _sphereRadius, value); }
+    }
+
+    /// <summary>
+    /// Persisted UI state (not shown in settings UI).
+    /// </summary>
+    public partial class UIStateSettings : ObservableObject {
+        /// <summary>Last selected tool index (0=Selector, 1=Terrain, 2=Road, 3=Height)</summary>
+        public int LastToolIndex { get; set; } = 0;
+        /// <summary>Last selected sub-tool index within the tool</summary>
+        public int LastSubToolIndex { get; set; } = 0;
+        /// <summary>Width of the left panel (object browser / texture palette)</summary>
+        public double LeftPanelWidth { get; set; } = 280;
+        /// <summary>Width of the right panel (tools / layers / history)</summary>
+        public double RightPanelWidth { get; set; } = 250;
     }
 }

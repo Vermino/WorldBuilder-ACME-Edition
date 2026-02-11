@@ -56,6 +56,8 @@ namespace WorldBuilder.Lib {
         public Vector3 Front => front;
         public Vector3 Up => up;
         public Vector3 Right => right;
+        public float Yaw => yaw;
+        public float Pitch => pitch;
 
         public Vector2 ScreenSize { get; set; }
 
@@ -162,6 +164,12 @@ namespace WorldBuilder.Lib {
 
         public void SetPosition(float x, float y, float z) {
             position = new Vector3(x, y, z);
+        }
+
+        public void SetYawPitch(float newYaw, float newPitch) {
+            yaw = newYaw;
+            pitch = Math.Clamp(newPitch, -89.9f, 89.9f);
+            UpdateCameraVectors();
         }
 
         private void UpdateCameraVectors() {

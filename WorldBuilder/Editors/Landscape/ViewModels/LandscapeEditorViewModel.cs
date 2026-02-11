@@ -96,8 +96,13 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             Tools.Add(TerrainSystem.Services.GetRequiredService<RoadDrawingToolViewModel>());
             Tools.Add(TerrainSystem.Services.GetRequiredService<HeightToolViewModel>());
 
-            if (Tools.Count > 0 && Tools[0].AllSubTools.Count > 0) {
-                SelectSubTool(Tools[0].AllSubTools[0]);
+            // Restore last selected tool/sub-tool from settings, or default to first
+            var uiState = Settings.Landscape.UIState;
+            int toolIdx = Math.Clamp(uiState.LastToolIndex, 0, Tools.Count - 1);
+            var tool = Tools[toolIdx];
+            int subIdx = Math.Clamp(uiState.LastSubToolIndex, 0, Math.Max(0, tool.AllSubTools.Count - 1));
+            if (tool.AllSubTools.Count > 0) {
+                SelectSubTool(tool.AllSubTools[subIdx]);
             }
 
             var documentStorageService = project.DocumentManager.DocumentStorageService;
@@ -392,6 +397,16 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         }
 
         public void Cleanup() {
+            // Save UI state before disposing
+            if (SelectedTool != null) {
+                var uiState = Settings.Landscape.UIState;
+                uiState.LastToolIndex = Tools.IndexOf(SelectedTool);
+                if (SelectedSubTool != null && SelectedTool.AllSubTools.Contains(SelectedSubTool)) {
+                    uiState.LastSubToolIndex = SelectedTool.AllSubTools.IndexOf(SelectedSubTool);
+                }
+                Settings.Save();
+            }
+
             TerrainSystem?.Dispose();
         }
     }

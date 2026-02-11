@@ -63,9 +63,15 @@ public partial class App : Application {
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) {
                 Console.WriteLine("Switching to main window");
                 var old = desktop.MainWindow;
-                desktop.MainWindow = new MainWindow { DataContext = mainVM };
+                var mainWindow = new MainWindow { DataContext = mainVM };
+                desktop.MainWindow = mainWindow;
                 desktop.MainWindow.Show();
                 old?.Close();
+
+                // Save settings when the main window is closing (X button, Alt+F4, or File > Exit)
+                mainWindow.Closing += (_, _) => {
+                    SaveSettingsOnExit();
+                };
             }
             else if (ApplicationLifetime is ISingleViewApplicationLifetime singleViewPlatform) {
                 singleViewPlatform.MainView = new MainView { DataContext = mainVM };
@@ -75,12 +81,54 @@ public partial class App : Application {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) {
             desktop.MainWindow = new SplashPageWindow { DataContext = projectSelectionVM };
             desktop.MainWindow.Show();
+
+            // Backup: also save on shutdown in case Closing didn't fire
+            desktop.ShutdownRequested += (s, e) => {
+                SaveSettingsOnExit();
+            };
         }
         else if (ApplicationLifetime is ISingleViewApplicationLifetime singleViewPlatform) {
             singleViewPlatform.MainView = new ProjectSelectionView { DataContext = projectSelectionVM };
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private bool _settingsSaved;
+
+    private void SaveSettingsOnExit() {
+        if (_settingsSaved) return; // Prevent double-save
+        _settingsSaved = true;
+
+        try {
+            Console.WriteLine("Saving settings on exit...");
+
+            // Try to save camera/tool state via the editor VM
+            try {
+                var editorVm = _projectManager?.GetProjectService<Editors.Landscape.ViewModels.LandscapeEditorViewModel>();
+                if (editorVm?.TerrainSystem?.Scene != null) {
+                    editorVm.TerrainSystem.Scene.SaveCameraState();
+                }
+                if (editorVm?.SelectedTool != null) {
+                    var uiState = editorVm.Settings.Landscape.UIState;
+                    uiState.LastToolIndex = editorVm.Tools.IndexOf(editorVm.SelectedTool);
+                    if (editorVm.SelectedSubTool != null && editorVm.SelectedTool.AllSubTools.Contains(editorVm.SelectedSubTool)) {
+                        uiState.LastSubToolIndex = editorVm.SelectedTool.AllSubTools.IndexOf(editorVm.SelectedSubTool);
+                    }
+                }
+            }
+            catch (Exception ex) {
+                Console.WriteLine($"Warning: Could not save editor state: {ex.Message}");
+            }
+
+            // Always save settings to disk
+            var settings = Services?.GetService<Lib.Settings.WorldBuilderSettings>();
+            settings?.Save();
+            Console.WriteLine("Settings saved successfully.");
+        }
+        catch (Exception ex) {
+            Console.WriteLine($"Error saving settings on exit: {ex.Message}");
+        }
     }
 
     private void SetupAutoUpdater() {

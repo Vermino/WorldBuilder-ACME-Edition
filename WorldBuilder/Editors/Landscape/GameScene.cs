@@ -168,7 +168,22 @@ namespace WorldBuilder.Editors.Landscape {
             var mapCenter = new Vector3(192f * 254f / 2f, 192f * 254f / 2f, 1000);
             PerspectiveCamera = new PerspectiveCamera(mapCenter, _settings);
             TopDownCamera = new OrthographicTopDownCamera(mapCenter, _settings);
-            CameraManager = new CameraManager(TopDownCamera);
+
+            // Restore saved camera state
+            var camSettings = _settings.Landscape.Camera;
+            if (camSettings.HasSavedPosition) {
+                var savedPos = new Vector3(camSettings.SavedPositionX, camSettings.SavedPositionY, camSettings.SavedPositionZ);
+                PerspectiveCamera.SetPosition(savedPos);
+                if (!float.IsNaN(camSettings.SavedYaw) && !float.IsNaN(camSettings.SavedPitch)) {
+                    PerspectiveCamera.SetYawPitch(camSettings.SavedYaw, camSettings.SavedPitch);
+                }
+                TopDownCamera.SetPosition(savedPos);
+                if (!float.IsNaN(camSettings.SavedOrthoSize)) {
+                    TopDownCamera.OrthographicSize = camSettings.SavedOrthoSize;
+                }
+            }
+
+            CameraManager = new CameraManager(camSettings.SavedIs3D ? PerspectiveCamera : TopDownCamera);
             //CameraManager.AddCamera(PerspectiveCamera);
 
             DataManager = new TerrainDataManager(terrainSystem, 16);
@@ -1264,7 +1279,24 @@ namespace WorldBuilder.Editors.Landscape {
             _gl.DeleteBuffer(instanceVBO);
         }
 
+        /// <summary>
+        /// Saves the current camera position, rotation, and mode to settings for persistence.
+        /// </summary>
+        public void SaveCameraState() {
+            var cam = _settings.Landscape.Camera;
+            var pos = CameraManager.Current.Position;
+            cam.SavedPositionX = pos.X;
+            cam.SavedPositionY = pos.Y;
+            cam.SavedPositionZ = pos.Z;
+            cam.SavedYaw = PerspectiveCamera.Yaw;
+            cam.SavedPitch = PerspectiveCamera.Pitch;
+            cam.SavedOrthoSize = TopDownCamera.OrthographicSize;
+            cam.SavedIs3D = CameraManager.Current == PerspectiveCamera;
+            _settings.Save();
+        }
+
         public void Dispose() {
+            SaveCameraState();
             if (!_disposed) {
                 _gl.DeleteBuffer(_sphereVBO);
                 _gl.DeleteBuffer(_sphereIBO);
