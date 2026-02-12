@@ -300,15 +300,11 @@ public partial class LandscapeEditorView : Base3DView {
     protected override void OnGlPointerPressed(PointerPressedEventArgs e) {
         if (!_didInit) return;
 
-        // Right-click context menu for selected objects or paste
+        // Right-click context menu when any object is selected (including scenery)
         if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed && _viewModel?.TerrainSystem != null) {
             var sel = _viewModel.TerrainSystem.EditingContext.ObjectSelection;
 
-            bool hasEditableSelection = sel.HasSelection &&
-                sel.SelectedEntries.Any(entry => !entry.IsScenery && entry.ObjectIndex >= 0);
-            bool hasClipboard = sel.Clipboard.HasValue || (sel.ClipboardMulti != null && sel.ClipboardMulti.Count > 0);
-
-            if (hasEditableSelection || hasClipboard) {
+            if (sel.HasSelection) {
                 ShowObjectContextMenu(e);
                 return; // Don't pass to camera/tool
             }
@@ -382,14 +378,12 @@ public partial class LandscapeEditorView : Base3DView {
 
         var menu = new ContextMenu();
 
-        // Selection-specific items
-        if (hasEditableSelection) {
-            // Copy
+        // Copy (available for any selection, including scenery)
+        if (sel.HasSelection) {
             var copyItem = new MenuItem { Header = "Copy", InputGesture = new Avalonia.Input.KeyGesture(Key.C, KeyModifiers.Control) };
             copyItem.Click += (_, _) => {
                 if (sel.IsMultiSelection) {
                     sel.ClipboardMulti = sel.SelectedEntries
-                        .Where(entry => !entry.IsScenery)
                         .Select(entry => entry.Object)
                         .ToList();
                     sel.Clipboard = null;
@@ -400,8 +394,10 @@ public partial class LandscapeEditorView : Base3DView {
                 }
             };
             menu.Items.Add(copyItem);
+        }
 
-            // Snap to Terrain
+        // Snap to Terrain (only for non-scenery editable objects)
+        if (hasEditableSelection) {
             var snapItem = new MenuItem { Header = "Snap to Terrain" };
             snapItem.Click += (_, _) => {
                 var selectTool = _viewModel.Tools
@@ -443,7 +439,7 @@ public partial class LandscapeEditorView : Base3DView {
             menu.Items.Add(pasteItem);
         }
 
-        // Delete (only when there's a selection)
+        // Delete (only for non-scenery editable objects)
         if (hasEditableSelection) {
             menu.Items.Add(new Separator());
 
