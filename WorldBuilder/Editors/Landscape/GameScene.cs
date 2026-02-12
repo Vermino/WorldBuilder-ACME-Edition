@@ -24,6 +24,7 @@ namespace WorldBuilder.Editors.Landscape {
         private const float PerspectiveProximityThreshold = 500f; // 2D distance for perspective camera
         private const int MaxLoadedLandblocks = 200; // Cap to prevent memory explosion when zoomed out
         private const float SceneryDistanceThreshold = 600f; // Beyond this, skip scenery (trees/rocks) — too small to see
+        private const float DungeonDistanceThreshold = 400f; // Beyond this, skip dungeon EnvCell loading — tighter than surface objects
         private const int MaxBatchSize = 30; // Max landblocks to load per background batch
 
         private OpenGLRenderer _renderer => _terrainSystem.Renderer;
@@ -379,6 +380,7 @@ namespace WorldBuilder.Editors.Landscape {
                 _lastDocUpdatePosition = cameraPosition;
                 KickOffBackgroundLoads(cameraPosition);
                 UnloadOutOfRangeLandblocks(cameraPosition);
+                UnloadDistantDungeons(cameraPosition);
                 UnloadDistantChunks(cameraPosition);
 
                 // Check if any loaded landblocks now deserve scenery that they didn't
@@ -526,6 +528,7 @@ namespace WorldBuilder.Editors.Landscape {
             var dats = _dats;
             var resultQueue = _backgroundLoadResults;
             var sceneryThreshold = GetEffectiveSceneryThreshold();
+            var dungeonThreshold = GetEffectiveDungeonThreshold();
             var camPosCapture = cameraPosition;
             var envCellManager = _envCellManager;
 
@@ -569,8 +572,10 @@ namespace WorldBuilder.Editors.Landscape {
                             }
 
                             // Load dungeon EnvCell geometry (CPU preparation on background thread)
+                            // Only load for nearby landblocks — dungeons cluster underground
+                            // and loading all of them causes heavy lag.
                             PreparedEnvCellBatch? envCellBatch = null;
-                            if (!envCellManager.HasLoadedCells(lbKey)) {
+                            if (distFromCamera <= dungeonThreshold && !envCellManager.HasLoadedCells(lbKey)) {
                                 uint lbId = (uint)lbKey;
                                 uint infoId = lbId << 16 | 0xFFFE;
                                 if (dats.TryGet<LandBlockInfo>(infoId, out var lbi) && lbi.NumCells > 0) {
@@ -673,6 +678,38 @@ namespace WorldBuilder.Editors.Landscape {
             // If there are more to unload, force re-check next frame
             if (toUnload.Count >= MaxUnloadsPerFrame) {
                 _lastDocUpdatePosition = new Vector3(float.MinValue);
+            }
+        }
+
+        /// <summary>
+        /// Unloads dungeon EnvCell data for landblocks beyond the dungeon distance threshold.
+        /// Dungeons use a tighter boundary than surface objects since they're underground
+        /// and many cluster close together.
+        /// </summary>
+        private void UnloadDistantDungeons(Vector3 cameraPosition) {
+            // Use 1.5x the dungeon threshold for hysteresis (same pattern as landblock unloading)
+            float unloadThreshold = DungeonDistanceThreshold * 1.5f;
+            var camPos2D = new Vector2(cameraPosition.X, cameraPosition.Y);
+
+            // Collect landblock keys that have loaded dungeon cells but are too far
+            var toUnload = new List<ushort>();
+            foreach (var lbKey in _envCellManager.GetLoadedLandblockKeys()) {
+                float dist = Vector2.Distance(camPos2D, LandblockCenter(lbKey));
+                if (dist > unloadThreshold) {
+                    toUnload.Add(lbKey);
+                }
+            }
+
+            foreach (var lbKey in toUnload) {
+                _envCellManager.UnloadLandblock(lbKey);
+                if (_dungeonStaticObjects.TryGetValue(lbKey, out var dungeonObjs)) {
+                    foreach (var obj in dungeonObjs) {
+                        _objectManager.ReleaseRenderData(obj.Id, obj.IsSetup);
+                    }
+                    _dungeonStaticObjects.Remove(lbKey);
+                }
+                _staticObjectsDirty = true;
+                Console.WriteLine($"[Statics] Unloaded distant dungeon data for LB 0x{lbKey:X4}");
             }
         }
 
@@ -1165,6 +1202,17 @@ namespace WorldBuilder.Editors.Landscape {
                 return SceneryDistanceThreshold * Math.Clamp(1800f / ortho.OrthographicSize, 0f, 1f);
             }
             return SceneryDistanceThreshold; // Perspective: always full threshold
+        }
+
+        /// <summary>
+        /// Returns the effective dungeon loading distance threshold scaled by zoom level.
+        /// Dungeons are underground so they're only relevant when viewing nearby.
+        /// </summary>
+        private float GetEffectiveDungeonThreshold() {
+            if (CameraManager?.Current is OrthographicTopDownCamera ortho && ortho.OrthographicSize > 0) {
+                return DungeonDistanceThreshold * Math.Clamp(1800f / ortho.OrthographicSize, 0f, 1f);
+            }
+            return DungeonDistanceThreshold;
         }
 
         /// <summary>

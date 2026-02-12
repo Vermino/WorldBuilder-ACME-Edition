@@ -11,6 +11,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using Chorizite.Core.Lib;
 using WorldBuilder.Lib;
 using WorldBuilder.Shared.Documents;
 using WorldBuilder.Shared.Lib;
@@ -24,6 +25,8 @@ namespace WorldBuilder.Editors.Landscape {
     /// geometry (vertices + polygons), and carries its own surface texture list and world transform.
     /// </summary>
     public class EnvCellManager : IDisposable {
+        private const int MaxLoadedDungeonCells = 500; // Hard cap on total loaded dungeon cells to prevent memory/GPU explosion
+
         private readonly OpenGLRenderer _renderer;
         private readonly IDatReaderWriter _dats;
         private readonly IShader _shader;
@@ -50,6 +53,9 @@ namespace WorldBuilder.Editors.Landscape {
         private uint _instanceVBO;
         private int _instanceBufferCapacity;
         private float[] _instanceUploadBuffer = Array.Empty<float>();
+
+        // Reusable cell grouping buffer (avoids per-frame dictionary allocation in Render)
+        private readonly Dictionary<EnvCellGpuKey, List<Matrix4x4>> _cellGroupBuffer = new();
 
         public EnvCellManager(OpenGLRenderer renderer, IDatReaderWriter dats, IShader objectShader, TextureDiskCache? textureCache = null) {
             _renderer = renderer;
@@ -177,6 +183,7 @@ namespace WorldBuilder.Editors.Landscape {
             return new PreparedEnvCell {
                 GpuKey = gpuKey,
                 WorldTransform = worldTransform,
+                WorldPosition = cellOrigin,
                 MeshData = meshData
             };
         }
@@ -407,11 +414,16 @@ namespace WorldBuilder.Editors.Landscape {
 
         /// <summary>
         /// Processes queued GPU uploads. Must be called on the GL thread (e.g. during Update).
-        /// Returns the number of batches processed.
+        /// Returns the number of batches processed. Skips uploads if at the cell cap.
         /// </summary>
         public int ProcessUploads(int maxPerFrame = 2) {
             int processed = 0;
             while (processed < maxPerFrame && _uploadQueue.TryDequeue(out var batch)) {
+                // Skip if we're already at the cell cap
+                if (LoadedCellCount >= MaxLoadedDungeonCells) {
+                    Console.WriteLine($"[EnvCellMgr] Cell cap ({MaxLoadedDungeonCells}) reached, skipping upload for LB 0x{batch.LandblockKey:X4}");
+                    continue;
+                }
                 FinalizeGpuUpload(batch);
                 processed++;
             }
@@ -432,7 +444,8 @@ namespace WorldBuilder.Editors.Landscape {
 
                 cells.Add(new LoadedEnvCell {
                     GpuKey = prepared.GpuKey,
-                    WorldTransform = prepared.WorldTransform
+                    WorldTransform = prepared.WorldTransform,
+                    WorldPosition = prepared.WorldPosition
                 });
             }
 
@@ -530,6 +543,7 @@ namespace WorldBuilder.Editors.Landscape {
             if (_loadedCells.Count == 0) return;
 
             var gl = _renderer.GraphicsDevice.GL;
+            var frustum = new Frustum(viewProjection);
 
             gl.Enable(EnableCap.DepthTest);
             gl.Enable(EnableCap.Blend);
@@ -546,19 +560,28 @@ namespace WorldBuilder.Editors.Landscape {
             _shader.SetUniform("uAmbientIntensity", ambientIntensity);
             _shader.SetUniform("uSpecularPower", specularPower);
 
-            // Group cells by GpuKey to batch draw calls
-            var cellGroups = new Dictionary<EnvCellGpuKey, List<Matrix4x4>>();
+            // Group visible cells by GpuKey to batch draw calls (frustum cull per cell)
+            const float cellBoundsRadius = 50f; // Approximate bounding radius for a dungeon room
+            foreach (var list in _cellGroupBuffer.Values) list.Clear();
+
             foreach (var lbCells in _loadedCells.Values) {
                 foreach (var cell in lbCells) {
-                    if (!cellGroups.TryGetValue(cell.GpuKey, out var list)) {
+                    // Frustum cull: skip cells whose bounding box is entirely outside the view
+                    var cellBounds = new Chorizite.Core.Lib.BoundingBox(
+                        cell.WorldPosition - new Vector3(cellBoundsRadius),
+                        cell.WorldPosition + new Vector3(cellBoundsRadius));
+                    if (!frustum.IntersectsBoundingBox(cellBounds)) continue;
+
+                    if (!_cellGroupBuffer.TryGetValue(cell.GpuKey, out var list)) {
                         list = new List<Matrix4x4>();
-                        cellGroups[cell.GpuKey] = list;
+                        _cellGroupBuffer[cell.GpuKey] = list;
                     }
                     list.Add(cell.WorldTransform);
                 }
             }
 
-            foreach (var (gpuKey, transforms) in cellGroups) {
+            foreach (var (gpuKey, transforms) in _cellGroupBuffer) {
+                if (transforms.Count == 0) continue;
                 if (!_gpuCache.TryGetValue(gpuKey, out var renderData)) continue;
                 if (renderData.Batches.Count == 0) continue;
 
@@ -693,6 +716,11 @@ namespace WorldBuilder.Editors.Landscape {
         /// </summary>
         public bool HasLoadedCells(ushort lbKey) => _loadedCells.ContainsKey(lbKey);
 
+        /// <summary>
+        /// Returns all landblock keys that currently have loaded dungeon cells.
+        /// </summary>
+        public IEnumerable<ushort> GetLoadedLandblockKeys() => _loadedCells.Keys.ToList();
+
         #endregion
 
         #region Helpers
@@ -751,6 +779,8 @@ namespace WorldBuilder.Editors.Landscape {
     public class LoadedEnvCell {
         public EnvCellGpuKey GpuKey { get; set; }
         public Matrix4x4 WorldTransform { get; set; }
+        /// <summary>World-space position for frustum culling.</summary>
+        public Vector3 WorldPosition { get; set; }
     }
 
     /// <summary>
@@ -772,6 +802,8 @@ namespace WorldBuilder.Editors.Landscape {
     public class PreparedEnvCell {
         public EnvCellGpuKey GpuKey { get; set; }
         public Matrix4x4 WorldTransform { get; set; }
+        /// <summary>World-space position for frustum culling.</summary>
+        public Vector3 WorldPosition { get; set; }
         public PreparedCellStructMesh MeshData { get; set; } = null!;
     }
 
