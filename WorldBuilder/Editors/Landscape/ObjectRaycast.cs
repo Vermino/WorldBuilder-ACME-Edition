@@ -135,8 +135,8 @@ namespace WorldBuilder.Editors.Landscape {
         }
 
         /// <summary>
-        /// Performs a marquee (box) select: projects all static objects to screen space
-        /// and returns those whose screen positions fall within the given rectangle.
+        /// Performs a marquee (box) select: projects all static objects' bounding boxes to screen space
+        /// and returns those whose screen-space footprint overlaps the given rectangle.
         /// </summary>
         public static List<ObjectRaycastHit> BoxSelect(
             Vector2 screenMin, Vector2 screenMax,
@@ -165,11 +165,58 @@ namespace WorldBuilder.Editors.Landscape {
 
                 for (int i = 0; i < lbDoc.StaticObjectCount; i++) {
                     var obj = lbDoc.GetStaticObject(i);
-                    var screenPos = WorldToScreen(obj.Origin, viewProjection, viewportWidth, viewportHeight);
-                    if (!screenPos.HasValue) continue;
 
-                    if (screenPos.Value.X >= rectMinX && screenPos.Value.X <= rectMaxX &&
-                        screenPos.Value.Y >= rectMinY && screenPos.Value.Y <= rectMaxY) {
+                    // Project the object's bounding box to screen space for accurate hit testing
+                    var bounds = scene._objectManager.GetBounds(obj.Id, obj.IsSetup);
+                    if (bounds == null) {
+                        // Fallback: use origin point if no bounds available
+                        var screenPos = WorldToScreen(obj.Origin, viewProjection, viewportWidth, viewportHeight);
+                        if (screenPos.HasValue &&
+                            screenPos.Value.X >= rectMinX && screenPos.Value.X <= rectMaxX &&
+                            screenPos.Value.Y >= rectMinY && screenPos.Value.Y <= rectMaxY) {
+                            results.Add(new ObjectRaycastHit {
+                                Hit = true, Object = obj, LandblockKey = lbKey,
+                                ObjectIndex = i, Distance = 0, HitPosition = obj.Origin, IsScenery = false
+                            });
+                        }
+                        continue;
+                    }
+
+                    var (localMin, localMax) = bounds.Value;
+                    var worldTransform = Matrix4x4.CreateScale(obj.Scale)
+                        * Matrix4x4.CreateFromQuaternion(obj.Orientation)
+                        * Matrix4x4.CreateTranslation(obj.Origin);
+
+                    // Project all 8 bounding box corners to screen space and compute screen AABB
+                    float screenMinX = float.MaxValue, screenMinY = float.MaxValue;
+                    float screenMaxX = float.MinValue, screenMaxY = float.MinValue;
+                    bool anyVisible = false;
+
+                    for (int cx = 0; cx <= 1; cx++) {
+                        for (int cy = 0; cy <= 1; cy++) {
+                            for (int cz = 0; cz <= 1; cz++) {
+                                var corner = new Vector3(
+                                    cx == 0 ? localMin.X : localMax.X,
+                                    cy == 0 ? localMin.Y : localMax.Y,
+                                    cz == 0 ? localMin.Z : localMax.Z);
+                                var worldCorner = Vector3.Transform(corner, worldTransform);
+                                var screenCorner = WorldToScreen(worldCorner, viewProjection, viewportWidth, viewportHeight);
+                                if (screenCorner.HasValue) {
+                                    anyVisible = true;
+                                    screenMinX = MathF.Min(screenMinX, screenCorner.Value.X);
+                                    screenMinY = MathF.Min(screenMinY, screenCorner.Value.Y);
+                                    screenMaxX = MathF.Max(screenMaxX, screenCorner.Value.X);
+                                    screenMaxY = MathF.Max(screenMaxY, screenCorner.Value.Y);
+                                }
+                            }
+                        }
+                    }
+
+                    if (!anyVisible) continue;
+
+                    // Check if object's screen AABB overlaps the marquee rectangle
+                    if (screenMaxX >= rectMinX && screenMinX <= rectMaxX &&
+                        screenMaxY >= rectMinY && screenMinY <= rectMaxY) {
                         results.Add(new ObjectRaycastHit {
                             Hit = true,
                             Object = obj,

@@ -256,7 +256,7 @@ namespace WorldBuilder.Editors.Landscape {
             _gl.BindBuffer(GLEnum.ArrayBuffer, _sphereInstanceVBO);
             _gl.BufferData(GLEnum.ArrayBuffer, 0, null, GLEnum.DynamicDraw);
             _gl.EnableVertexAttribArray(2);
-            _gl.VertexAttribPointer(2, 3, GLEnum.Float, false, (uint)sizeof(Vector3), null);
+            _gl.VertexAttribPointer(2, 4, GLEnum.Float, false, (uint)sizeof(Vector4), null);
             _gl.VertexAttribDivisor(2, 1);
 
             _gl.GenBuffers(1, out _sphereIBO);
@@ -1074,29 +1074,45 @@ namespace WorldBuilder.Editors.Landscape {
         private unsafe void RenderSelectionHighlight(ObjectSelectionState selection, ICamera camera, Matrix4x4 viewProjection) {
             if (!selection.HasSelection) return;
 
-            // Collect corners for all selected objects
-            var allCorners = new List<Vector3>();
+            // Collect corners for all selected objects, with per-object sphere radius
+            var allInstances = new List<Vector4>();
             foreach (var entry in selection.SelectedEntries.ToList()) {
                 var obj = entry.Object;
                 var bounds = _objectManager.GetBounds(obj.Id, obj.IsSetup);
                 if (bounds == null) continue;
 
                 var (localMin, localMax) = bounds.Value;
+
+                // Compute per-object sphere radius proportional to bounding box size
+                var extent = (localMax - localMin) * obj.Scale;
+                float maxExtent = MathF.Max(extent.X, MathF.Max(extent.Y, extent.Z));
+                float radius = Math.Clamp(maxExtent * 0.1f, 0.15f, SphereRadius * 0.5f);
+
                 var worldTransform = Matrix4x4.CreateScale(obj.Scale)
                     * Matrix4x4.CreateFromQuaternion(obj.Orientation)
                     * Matrix4x4.CreateTranslation(obj.Origin);
 
-                allCorners.Add(Vector3.Transform(new Vector3(localMin.X, localMin.Y, localMin.Z), worldTransform));
-                allCorners.Add(Vector3.Transform(new Vector3(localMax.X, localMin.Y, localMin.Z), worldTransform));
-                allCorners.Add(Vector3.Transform(new Vector3(localMin.X, localMax.Y, localMin.Z), worldTransform));
-                allCorners.Add(Vector3.Transform(new Vector3(localMax.X, localMax.Y, localMin.Z), worldTransform));
-                allCorners.Add(Vector3.Transform(new Vector3(localMin.X, localMin.Y, localMax.Z), worldTransform));
-                allCorners.Add(Vector3.Transform(new Vector3(localMax.X, localMin.Y, localMax.Z), worldTransform));
-                allCorners.Add(Vector3.Transform(new Vector3(localMin.X, localMax.Y, localMax.Z), worldTransform));
-                allCorners.Add(Vector3.Transform(new Vector3(localMax.X, localMax.Y, localMax.Z), worldTransform));
+                // Pack each corner as Vector4(x, y, z, radius)
+                Vector3 corner;
+                corner = Vector3.Transform(new Vector3(localMin.X, localMin.Y, localMin.Z), worldTransform);
+                allInstances.Add(new Vector4(corner, radius));
+                corner = Vector3.Transform(new Vector3(localMax.X, localMin.Y, localMin.Z), worldTransform);
+                allInstances.Add(new Vector4(corner, radius));
+                corner = Vector3.Transform(new Vector3(localMin.X, localMax.Y, localMin.Z), worldTransform);
+                allInstances.Add(new Vector4(corner, radius));
+                corner = Vector3.Transform(new Vector3(localMax.X, localMax.Y, localMin.Z), worldTransform);
+                allInstances.Add(new Vector4(corner, radius));
+                corner = Vector3.Transform(new Vector3(localMin.X, localMin.Y, localMax.Z), worldTransform);
+                allInstances.Add(new Vector4(corner, radius));
+                corner = Vector3.Transform(new Vector3(localMax.X, localMin.Y, localMax.Z), worldTransform);
+                allInstances.Add(new Vector4(corner, radius));
+                corner = Vector3.Transform(new Vector3(localMin.X, localMax.Y, localMax.Z), worldTransform);
+                allInstances.Add(new Vector4(corner, radius));
+                corner = Vector3.Transform(new Vector3(localMax.X, localMax.Y, localMax.Z), worldTransform);
+                allInstances.Add(new Vector4(corner, radius));
             }
 
-            if (allCorners.Count == 0) return;
+            if (allInstances.Count == 0) return;
 
             // Render spheres at all corners in one draw call
             _gl.Enable(EnableCap.Blend);
@@ -1112,16 +1128,15 @@ namespace WorldBuilder.Editors.Landscape {
             _sphereShader.SetUniform("uGlowColor", new Vector3(1.0f, 0.8f, 0.0f));
             _sphereShader.SetUniform("uGlowIntensity", 2.0f);
             _sphereShader.SetUniform("uGlowPower", 0.3f);
-            _sphereShader.SetUniform("uSphereRadius", SphereRadius * 0.5f);
 
-            var cornersArray = allCorners.ToArray();
+            var instanceArray = allInstances.ToArray();
             _gl.BindBuffer(GLEnum.ArrayBuffer, _sphereInstanceVBO);
-            fixed (Vector3* posPtr = cornersArray) {
-                _gl.BufferData(GLEnum.ArrayBuffer, (nuint)(cornersArray.Length * sizeof(Vector3)), posPtr, GLEnum.DynamicDraw);
+            fixed (Vector4* ptr = instanceArray) {
+                _gl.BufferData(GLEnum.ArrayBuffer, (nuint)(instanceArray.Length * sizeof(Vector4)), ptr, GLEnum.DynamicDraw);
             }
 
             _gl.BindVertexArray(_sphereVAO);
-            _gl.DrawElementsInstanced(GLEnum.Triangles, (uint)_sphereIndexCount, GLEnum.UnsignedInt, null, (uint)cornersArray.Length);
+            _gl.DrawElementsInstanced(GLEnum.Triangles, (uint)_sphereIndexCount, GLEnum.UnsignedInt, null, (uint)instanceArray.Length);
             _gl.BindVertexArray(0);
             _gl.UseProgram(0);
             _gl.Disable(EnableCap.Blend);
@@ -1217,17 +1232,18 @@ namespace WorldBuilder.Editors.Landscape {
             if (activeVerts.Length == 0) return;
 
             int count = activeVerts.Length;
-            var positions = new Vector3[count];
+            var instances = new Vector4[count];
             for (int i = 0; i < count; i++) {
                 try {
                     var vertex = activeVerts[i];
-                    positions[i] = new Vector3(
+                    instances[i] = new Vector4(
                         vertex.X,
                         vertex.Y,
-                        DataManager.GetHeightAtPosition(vertex.X, vertex.Y) + SphereHeightOffset);
+                        DataManager.GetHeightAtPosition(vertex.X, vertex.Y) + SphereHeightOffset,
+                        SphereRadius);
                 }
                 catch {
-                    positions[i] = Vector3.Zero;
+                    instances[i] = new Vector4(0, 0, 0, SphereRadius);
                 }
             }
 
@@ -1245,11 +1261,10 @@ namespace WorldBuilder.Editors.Landscape {
             _sphereShader.SetUniform("uGlowColor", SphereGlowColor);
             _sphereShader.SetUniform("uGlowIntensity", SphereGlowIntensity);
             _sphereShader.SetUniform("uGlowPower", SphereGlowPower);
-            _sphereShader.SetUniform("uSphereRadius", SphereRadius);
 
             _gl.BindBuffer(GLEnum.ArrayBuffer, _sphereInstanceVBO);
-            fixed (Vector3* posPtr = positions) {
-                _gl.BufferData(GLEnum.ArrayBuffer, (nuint)(count * sizeof(Vector3)), posPtr, GLEnum.DynamicDraw);
+            fixed (Vector4* ptr = instances) {
+                _gl.BufferData(GLEnum.ArrayBuffer, (nuint)(count * sizeof(Vector4)), ptr, GLEnum.DynamicDraw);
             }
 
             _gl.BindVertexArray(_sphereVAO);
