@@ -33,7 +33,7 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
 
         partial void OnBrushRadiusChanged(float value) {
             if (value < 0.5f) BrushRadius = 0.5f;
-            if (value > 50f) BrushRadius = 50f;
+            if (value > 200f) BrushRadius = 200f;
         }
 
         partial void OnStrengthChanged(int value) {

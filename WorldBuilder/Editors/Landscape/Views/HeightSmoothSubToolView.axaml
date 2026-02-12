@@ -19,36 +19,48 @@
         <!--  Brush Radius  -->
         <StackPanel Spacing="5">
             <TextBlock Text="Brush Radius" />
-            <Grid ColumnDefinitions="*,60">
+            <Grid ColumnDefinitions="*,80">
                 <Slider
                     Grid.Column="0"
                     IsSnapToTickEnabled="True"
-                    Maximum="50"
+                    Maximum="200"
                     Minimum="0.5"
                     TickFrequency="0.5"
                     Value="{Binding BrushRadius}" />
-                <TextBlock
+                <NumericUpDown
                     Grid.Column="1"
-                    Margin="10,0,0,0"
-                    VerticalAlignment="Center"
-                    Text="{Binding BrushRadius, StringFormat='{}{0:F1}'}" />
+                    Margin="6,0,0,0"
+                    Minimum="0.5"
+                    Maximum="200"
+                    Increment="0.5"
+                    FormatString="F1"
+                    ShowButtonSpinner="False"
+                    Value="{Binding BrushRadius}"
+                    FontSize="11"
+                    Padding="4,2" />
             </Grid>
         </StackPanel>
 
         <!--  Strength  -->
         <StackPanel Spacing="5">
             <TextBlock Text="Strength" />
-            <Grid ColumnDefinitions="*,60">
+            <Grid ColumnDefinitions="*,80">
                 <Slider
                     Grid.Column="0"
                     Maximum="1"
                     Minimum="0"
                     Value="{Binding Strength}" />
-                <TextBlock
+                <NumericUpDown
                     Grid.Column="1"
-                    Margin="10,0,0,0"
-                    VerticalAlignment="Center"
-                    Text="{Binding Strength, StringFormat='{}{0:F2}'}" />
+                    Margin="6,0,0,0"
+                    Minimum="0"
+                    Maximum="1"
+                    Increment="0.05"
+                    FormatString="F2"
+                    ShowButtonSpinner="False"
+                    Value="{Binding Strength}"
+                    FontSize="11"
+                    Padding="4,2" />
             </Grid>
         </StackPanel>
 

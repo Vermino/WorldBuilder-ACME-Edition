@@ -17,7 +17,7 @@ appcast.xml.signature
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
-# Mono auto generated files
+# Mono auto generated filess
 mono_crash.*
 
 # Build results
@@ -456,3 +456,6 @@ $RECYCLE.BIN/
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+# Cursor editor backup files
+*.final
