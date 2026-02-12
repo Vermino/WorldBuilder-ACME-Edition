@@ -40,6 +40,7 @@ namespace WorldBuilder.Shared.Lib {
                     Type _ when typeof(T) == typeof(RenderTexture) => Dats.Portal.TryGet(id, out file),
                     Type _ when typeof(T) == typeof(RenderSurface) => Dats.Portal.TryGet(id, out file),
                     Type _ when typeof(T) == typeof(SurfaceTexture) => Dats.Portal.TryGet(id, out file),
+                    Type _ when typeof(T) == typeof(DatReaderWriter.DBObjs.Environment) => Dats.Portal.TryGet(id, out file),
                     _ => throw new NotImplementedException($"DefaultDatReaderWriter does not currently support {typeof(T)}"),
                 };
             }
@@ -60,6 +61,7 @@ namespace WorldBuilder.Shared.Lib {
                     Type _ when typeof(T) == typeof(Surface) => Dats.Portal.TryWriteFile(file, iteration),
                     Type _ when typeof(T) == typeof(RenderSurface) => Dats.Portal.TryWriteFile(file, iteration),
                     Type _ when typeof(T) == typeof(SurfaceTexture) => Dats.Portal.TryWriteFile(file, iteration),
+                    Type _ when typeof(T) == typeof(DatReaderWriter.DBObjs.Environment) => Dats.Portal.TryWriteFile(file, iteration),
                     _ => throw new NotImplementedException($"DefaultDatReaderWriter does not currently support {typeof(T)}"),
                 };
             }
