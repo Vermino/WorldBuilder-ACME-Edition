@@ -1410,9 +1410,14 @@ namespace WorldBuilder.Editors.Landscape {
                 Console.WriteLine($"[GameScene.Render] Static objects: {renderStaticsMs}ms ({visibleObjects.Count} objects)");
             }
 
-            // Render dungeon EnvCell geometry
+            // Render dungeon EnvCell geometry.
+            // Use polygon offset to push dungeon geometry slightly forward in the depth
+            // buffer so it always wins over the terrain/water surface at the same Z level.
             if (ShowDungeons) {
+                _gl.Enable(EnableCap.PolygonOffsetFill);
+                _gl.PolygonOffset(-1f, -1f);
                 _envCellManager.Render(viewProjection, camera, LightDirection, AmbientLightIntensity, SpecularPower);
+                _gl.Disable(EnableCap.PolygonOffsetFill);
             }
 
             // Render selection highlight
