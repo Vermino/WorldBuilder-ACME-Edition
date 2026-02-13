@@ -245,6 +245,24 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             // Since this runs every frame, we can use InputState.
             SelectedTool?.HandleMouseMove(inputState.MouseState);
             SelectedTool?.Update(deltaTime);
+
+            SyncCameras(camera);
+        }
+
+        private void SyncCameras(ICamera source) {
+            if (TerrainSystem == null) return;
+
+            var pCam = TerrainSystem.Scene.PerspectiveCamera;
+            var orthoCam = TerrainSystem.Scene.TopDownCamera;
+
+            if (source == pCam) {
+                // Sync Ortho to Perspective (X, Y only)
+                orthoCam.SetPosition(new Vector3(pCam.Position.X, pCam.Position.Y, orthoCam.Position.Z));
+            }
+            else if (source == orthoCam) {
+                // Sync Perspective to Ortho (X, Y only)
+                pCam.SetPosition(new Vector3(orthoCam.Position.X, orthoCam.Position.Y, pCam.Position.Z));
+            }
         }
 
         [RelayCommand]
