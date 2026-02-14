@@ -43,10 +43,19 @@ namespace WorldBuilder.Editors.Landscape {
         // Per-landblock list of loaded dungeon cells
         private readonly Dictionary<ushort, List<LoadedEnvCell>> _loadedCells = new();
 
+        // Track which landblocks are dungeon-only (vs building interiors)
+        private readonly HashSet<ushort> _dungeonOnlyLandblocks = new();
+
         /// <summary>
         /// When set, only render dungeon cells from this landblock. Null = show all.
         /// </summary>
         public ushort? FocusedDungeonLB { get; set; }
+
+        /// <summary>
+        /// Controls whether dungeon-only cells are rendered. Building interior cells
+        /// always render regardless of this flag.
+        /// </summary>
+        public bool ShowDungeonCells { get; set; } = true;
 
         /// <summary>
         /// Returns all landblock keys that have loaded dungeon cells, sorted.
@@ -126,6 +135,7 @@ namespace WorldBuilder.Editors.Landscape {
 
             var batch = new PreparedEnvCellBatch {
                 LandblockKey = lbKey,
+                IsDungeonOnly = isDungeonOnly,
                 Cells = new List<PreparedEnvCell>()
             };
 
@@ -147,11 +157,12 @@ namespace WorldBuilder.Editors.Landscape {
 
                     // Extract static objects (furniture, torches, etc.) from inside this EnvCell.
                     // Stab Frame.Origin is in landblock-local space (confirmed by diagnostic).
-                    // Apply same dungeon depth bump as cell geometry to keep them aligned.
+                    // Route to dungeon vs building list based on landblock type.
                     if (envCell.StaticObjects != null && envCell.StaticObjects.Count > 0) {
                         var stabZOffset = new Vector3(0, 0, dungeonZBump);
+                        var targetList = isDungeonOnly ? batch.DungeonStaticObjects : batch.BuildingStaticObjects;
                         foreach (var stab in envCell.StaticObjects) {
-                            batch.DungeonStaticObjects.Add(new StaticObject {
+                            targetList.Add(new StaticObject {
                                 Id = stab.Id,
                                 IsSetup = (stab.Id & 0x02000000) != 0,
                                 Origin = stab.Frame.Origin + lbOffset + stabZOffset,
@@ -166,9 +177,11 @@ namespace WorldBuilder.Editors.Landscape {
                 }
             }
 
-            Console.WriteLine($"[EnvCellMgr] LB 0x{lbKey:X4}: {envCells.Count} EnvCells in, {batch.Cells.Count} prepared OK, {batch.DungeonStaticObjects.Count} static objects");
+            Console.WriteLine($"[EnvCellMgr] LB 0x{lbKey:X4}: {envCells.Count} EnvCells in, {batch.Cells.Count} prepared OK, " +
+                $"{batch.DungeonStaticObjects.Count} dungeon statics, {batch.BuildingStaticObjects.Count} building statics" +
+                (isDungeonOnly ? " [dungeon]" : " [building]"));
 
-            return batch.Cells.Count > 0 || batch.DungeonStaticObjects.Count > 0 ? batch : null;
+            return batch.Cells.Count > 0 || batch.DungeonStaticObjects.Count > 0 || batch.BuildingStaticObjects.Count > 0 ? batch : null;
         }
 
 
@@ -498,6 +511,10 @@ namespace WorldBuilder.Editors.Landscape {
 
             if (cells.Count > 0) {
                 _loadedCells[batch.LandblockKey] = cells;
+                if (batch.IsDungeonOnly)
+                    _dungeonOnlyLandblocks.Add(batch.LandblockKey);
+                else
+                    _dungeonOnlyLandblocks.Remove(batch.LandblockKey);
                 Console.WriteLine($"[EnvCellMgr] GPU upload LB 0x{batch.LandblockKey:X4}: {cells.Count} cells, {_gpuCache.Count} unique GPU entries total");
             }
         }
@@ -612,8 +629,14 @@ namespace WorldBuilder.Editors.Landscape {
             foreach (var list in _cellGroupBuffer.Values) list.Clear();
 
             foreach (var kvp in _loadedCells) {
-                // Filter: only render the focused dungeon's landblock (if set)
-                if (FocusedDungeonLB.HasValue && kvp.Key != FocusedDungeonLB.Value) continue;
+                bool isDungeon = _dungeonOnlyLandblocks.Contains(kvp.Key);
+
+                // Building interior cells always render.
+                // Dungeon cells require ShowDungeonCells and respect the focus filter.
+                if (isDungeon) {
+                    if (!ShowDungeonCells) continue;
+                    if (FocusedDungeonLB.HasValue && kvp.Key != FocusedDungeonLB.Value) continue;
+                }
 
                 foreach (var cell in kvp.Value) {
                     // Frustum cull: skip cells whose bounding box is entirely outside the view
@@ -740,6 +763,7 @@ namespace WorldBuilder.Editors.Landscape {
             }
 
             _loadedCells.Remove(lbKey);
+            _dungeonOnlyLandblocks.Remove(lbKey);
 
             // Check if any remaining landblocks still reference these GPU keys
             foreach (var otherCells in _loadedCells.Values) {
@@ -877,6 +901,7 @@ namespace WorldBuilder.Editors.Landscape {
             }
             _gpuCache.Clear();
             _loadedCells.Clear();
+            _dungeonOnlyLandblocks.Clear();
             _environmentCache.Clear();
             if (_instanceVBO != 0) gl.DeleteBuffer(_instanceVBO);
         }
@@ -940,12 +965,18 @@ namespace WorldBuilder.Editors.Landscape {
     /// </summary>
     public class PreparedEnvCellBatch {
         public ushort LandblockKey { get; set; }
+        public bool IsDungeonOnly { get; set; }
         public List<PreparedEnvCell> Cells { get; set; } = new();
         /// <summary>
-        /// Static objects (furniture, torches, decorations) from inside dungeon EnvCells,
-        /// already transformed to world space. Fed into the regular static object pipeline.
+        /// Static objects from inside dungeon-only EnvCells (underground).
+        /// Only shown when the dungeon is focused to avoid overworld clutter.
         /// </summary>
         public List<StaticObject> DungeonStaticObjects { get; set; } = new();
+        /// <summary>
+        /// Static objects from inside building interior EnvCells (surface level).
+        /// Always shown alongside regular outdoor statics.
+        /// </summary>
+        public List<StaticObject> BuildingStaticObjects { get; set; } = new();
     }
 
     /// <summary>

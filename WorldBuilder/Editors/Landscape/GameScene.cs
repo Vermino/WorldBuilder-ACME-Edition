@@ -52,6 +52,7 @@ namespace WorldBuilder.Editors.Landscape {
 
         private readonly Dictionary<ushort, List<StaticObject>> _sceneryObjects = new();
         private readonly Dictionary<ushort, List<StaticObject>> _dungeonStaticObjects = new();
+        private readonly Dictionary<ushort, List<StaticObject>> _buildingStaticObjects = new();
         internal readonly TerrainSystem _terrainSystem;
 
         // Static object background loading state
@@ -460,10 +461,20 @@ namespace WorldBuilder.Editors.Landscape {
                 if (result.EnvCellBatch != null) {
                     _envCellManager.QueueForUpload(result.EnvCellBatch);
 
-                    // Add dungeon static objects (furniture, torches, etc.) to the rendering pipeline
+                    // Add dungeon static objects (only shown when dungeon is focused)
                     if (result.EnvCellBatch.DungeonStaticObjects.Count > 0) {
                         _dungeonStaticObjects[result.LbKey] = result.EnvCellBatch.DungeonStaticObjects;
                         foreach (var obj in result.EnvCellBatch.DungeonStaticObjects) {
+                            if (_objectManager.TryGetCachedRenderData(obj.Id) == null && !_objectManager.IsKnownFailure(obj.Id)) {
+                                _renderDataWarmupQueue.Enqueue((obj.Id, obj.IsSetup));
+                            }
+                        }
+                    }
+
+                    // Add building interior static objects (always shown with regular statics)
+                    if (result.EnvCellBatch.BuildingStaticObjects.Count > 0) {
+                        _buildingStaticObjects[result.LbKey] = result.EnvCellBatch.BuildingStaticObjects;
+                        foreach (var obj in result.EnvCellBatch.BuildingStaticObjects) {
                             if (_objectManager.TryGetCachedRenderData(obj.Id) == null && !_objectManager.IsKnownFailure(obj.Id)) {
                                 _renderDataWarmupQueue.Enqueue((obj.Id, obj.IsSetup));
                             }
@@ -667,6 +678,12 @@ namespace WorldBuilder.Editors.Landscape {
                         }
                         _dungeonStaticObjects.Remove(lbKey);
                     }
+                    if (_buildingStaticObjects.TryGetValue(lbKey, out var buildingObjs)) {
+                        foreach (var obj in buildingObjs) {
+                            _objectManager.ReleaseRenderData(obj.Id, obj.IsSetup);
+                        }
+                        _buildingStaticObjects.Remove(lbKey);
+                    }
 
                     // Fire-and-forget the document close (DB/IO work)
                     _ = _documentManager.CloseDocumentAsync(docId);
@@ -711,6 +728,12 @@ namespace WorldBuilder.Editors.Landscape {
                         _objectManager.ReleaseRenderData(obj.Id, obj.IsSetup);
                     }
                     _dungeonStaticObjects.Remove(lbKey);
+                }
+                if (_buildingStaticObjects.TryGetValue(lbKey, out var buildingObjs2)) {
+                    foreach (var obj in buildingObjs2) {
+                        _objectManager.ReleaseRenderData(obj.Id, obj.IsSetup);
+                    }
+                    _buildingStaticObjects.Remove(lbKey);
                 }
                 _staticObjectsDirty = true;
                 Console.WriteLine($"[Statics] Unloaded distant dungeon data for LB 0x{lbKey:X4}");
@@ -1304,9 +1327,14 @@ namespace WorldBuilder.Editors.Landscape {
                 if (ShowScenery) {
                     statics.AddRange(_sceneryObjects.Values.SelectMany(x => x));
                 }
+                // Building interior statics (furniture inside shops, etc.) always show
+                // alongside regular outdoor statics — they're at surface level.
+                if (ShowStaticObjects) {
+                    statics.AddRange(_buildingStaticObjects.Values.SelectMany(x => x));
+                }
+                // Dungeon statics only show when a specific dungeon is focused,
+                // otherwise they render as floating objects in the overworld view.
                 if (ShowDungeons && focusedLB.HasValue) {
-                    // Only include dungeon statics when a specific dungeon is focused,
-                    // otherwise they render as floating objects in the overworld view.
                     foreach (var kvp in _dungeonStaticObjects) {
                         if (kvp.Key != focusedLB.Value) continue;
                         statics.AddRange(kvp.Value);
@@ -1414,10 +1442,10 @@ namespace WorldBuilder.Editors.Landscape {
                 Console.WriteLine($"[GameScene.Render] Static objects: {renderStaticsMs}ms ({visibleObjects.Count} objects)");
             }
 
-            // Render dungeon EnvCell geometry
-            if (ShowDungeons) {
-                _envCellManager.Render(viewProjection, camera, LightDirection, AmbientLightIntensity, SpecularPower);
-            }
+            // Render EnvCell geometry — building interiors always render,
+            // dungeon cells are gated by ShowDungeons toggle + focus filter.
+            _envCellManager.ShowDungeonCells = ShowDungeons;
+            _envCellManager.Render(viewProjection, camera, LightDirection, AmbientLightIntensity, SpecularPower);
 
             // Render selection highlight
             if (editingContext.ObjectSelection.HasSelection) {
