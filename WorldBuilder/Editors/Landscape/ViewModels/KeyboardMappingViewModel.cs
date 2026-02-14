@@ -91,10 +91,11 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         [RelayCommand]
         private void Save() {
             _settings.Save();
-            // Revert button logic depends on state?
-            // The user requirement says "leaving the revert button unless they press save... which will solidify".
-            // So "Save" solidifies. Revert reverts to *last saved*.
-            // If we just saved, Revert would revert to now.
+
+            // Mark all bindings as saved (unmodified)
+            foreach (var binding in Bindings) {
+                binding.MarkAsSaved();
+            }
         }
 
         [RelayCommand]
@@ -117,6 +118,9 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         public string Description => Source.Description;
         public string Category => Source.Category;
 
+        private Key _originalKey;
+        private KeyModifiers _originalModifiers;
+
         [ObservableProperty]
         private Key _key;
 
@@ -126,15 +130,40 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         [ObservableProperty]
         private bool _isListening;
 
+        [ObservableProperty]
+        private bool _isModified;
+
         public InputBindingViewModel(InputBinding source) {
             Source = source;
             Key = source.Key;
             Modifiers = source.Modifiers;
+
+            // Store original state for modification tracking
+            _originalKey = source.Key;
+            _originalModifiers = source.Modifiers;
         }
 
         public void Commit() {
             Source.Key = Key;
             Source.Modifiers = Modifiers;
+            CheckModified();
+        }
+
+        public void MarkAsSaved() {
+            _originalKey = Key;
+            _originalModifiers = Modifiers;
+            CheckModified();
+        }
+
+        [RelayCommand]
+        public void RevertBinding() {
+            Key = _originalKey;
+            Modifiers = _originalModifiers;
+            Commit(); // Updates Source and IsModified
+        }
+
+        private void CheckModified() {
+            IsModified = Key != _originalKey || Modifiers != _originalModifiers;
         }
 
         public string KeyDisplay => $"{Modifiers} + {Key}".Replace("None + ", "").Replace("None", "");

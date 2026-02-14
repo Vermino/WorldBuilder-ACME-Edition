@@ -8,6 +8,13 @@
              x:Class="WorldBuilder.Editors.Landscape.Views.KeyboardMappingView"
              Focusable="True">
 
+  <UserControl.Styles>
+    <Style Selector="TextBlock.modified">
+       <Setter Property="FontWeight" Value="Bold"/>
+       <Setter Property="Foreground" Value="{DynamicResource SystemAccentColor}"/>
+    </Style>
+  </UserControl.Styles>
+
   <Grid RowDefinitions="*,Auto" Margin="10">
     <ListBox ItemsSource="{Binding Bindings}" SelectedItem="{Binding SelectedBinding}" Background="Transparent">
       <ListBox.ItemTemplate>
@@ -24,14 +31,24 @@
                      Command="{Binding $parent[UserControl].((vm:KeyboardMappingViewModel)DataContext).StartRebindCommand}"
                      CommandParameter="{Binding}"
                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
-                <TextBlock Text="{Binding KeyDisplay}" />
+                <TextBlock Text="{Binding KeyDisplay}" Classes.modified="{Binding IsModified}" />
              </Button>
 
-             <!-- Edit State Indicator -->
-             <TextBlock Grid.Column="2" Text=" Press Key... "
-                        IsVisible="{Binding IsListening}"
-                        Foreground="Orange" FontWeight="Bold"
-                        VerticalAlignment="Center" Margin="10,0,0,0"/>
+             <!-- Revert Button / Edit State Indicator -->
+             <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="10,0,0,0" VerticalAlignment="Center">
+                 <Button Command="{Binding RevertBindingCommand}"
+                         IsVisible="{Binding IsModified}"
+                         ToolTip.Tip="Revert to saved"
+                         Padding="5">
+                     <PathIcon Data="M12.5,8c-2.65,0-5.05,0.99-6.9,2.6L2,7v9h9l-3.62-3.62c1.39-1.16,3.16-1.88,5.12-1.88c3.54,0,6.55,2.31,7.6,5.5l2.37-0.78C21.08,11.03,17.15,8,12.5,8z"
+                               Width="16" Height="16"/>
+                 </Button>
+
+                 <TextBlock Text=" Press Key... "
+                            IsVisible="{Binding IsListening}"
+                            Foreground="Orange" FontWeight="Bold"
+                            VerticalAlignment="Center" Margin="5,0,0,0"/>
+             </StackPanel>
           </Grid>
         </DataTemplate>
       </ListBox.ItemTemplate>
