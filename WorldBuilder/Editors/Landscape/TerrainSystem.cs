@@ -70,6 +70,8 @@ namespace WorldBuilder.Editors.Landscape {
             collection.AddSingleton(project);
             collection.AddSingleton(History ?? throw new ArgumentNullException(nameof(History)));
             collection.AddSingleton<HistorySnapshotPanelViewModel>();
+            collection.AddSingleton<AvailableLandblockFinder>();
+            collection.AddSingleton<AvailableLandblocksViewModel>();
             collection.AddTransient<PerspectiveCamera>();
             collection.AddTransient<OrthographicTopDownCamera>();
 

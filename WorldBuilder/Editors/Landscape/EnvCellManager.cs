@@ -172,6 +172,7 @@ namespace WorldBuilder.Editors.Landscape {
             if (meshData == null) return null;
 
             return new PreparedEnvCell {
+                CellId = envCell.Id,
                 GpuKey = gpuKey,
                 WorldTransform = worldTransform,
                 WorldPosition = cellOrigin,
@@ -434,6 +435,7 @@ namespace WorldBuilder.Editors.Landscape {
                 }
 
                 cells.Add(new LoadedEnvCell {
+                    CellId = prepared.CellId,
                     GpuKey = prepared.GpuKey,
                     WorldTransform = prepared.WorldTransform,
                     WorldPosition = prepared.WorldPosition
@@ -661,6 +663,78 @@ namespace WorldBuilder.Editors.Landscape {
 
         #endregion
 
+        #region Editing
+
+        /// <summary>
+        /// Creates a new EnvCell with the specified parameters and adds it to the system.
+        /// Returns the created EnvCell.
+        /// </summary>
+        public EnvCell CreateEnvCell(uint lbId, ushort cellId, uint envId, ushort cellStructure, Vector3 position, Quaternion orientation) {
+            uint fullId = (lbId << 16) | cellId;
+
+            var cell = new EnvCell {
+                Id = fullId,
+                EnvironmentId = (ushort)envId,
+                CellStructure = cellStructure,
+                Position = new Frame {
+                    Origin = position,
+                    Orientation = orientation
+                }
+            };
+
+            var lbKey = (ushort)(lbId & 0xFFFF);
+            // We reuse PrepareLandblockEnvCells logic for a single cell
+            var batch = PrepareLandblockEnvCells(lbKey, lbId, new List<EnvCell> { cell });
+            if (batch != null) {
+                QueueForUpload(batch);
+            }
+
+            return cell;
+        }
+
+        /// <summary>
+        /// Deletes an EnvCell from the system and unloads its GPU resources.
+        /// </summary>
+        public void DeleteEnvCell(uint lbId, ushort cellId) {
+            var lbKey = (ushort)(lbId & 0xFFFF);
+            if (_loadedCells.TryGetValue(lbKey, out var cells)) {
+                var cellToRemove = cells.FirstOrDefault(c => c.CellId == ((lbId << 16) | cellId));
+                if (cellToRemove != null) {
+                    cells.Remove(cellToRemove);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Allocates a new unique EnvCell ID within the given landblock.
+        /// Scans for the first available ID in range 0x0100-0xFFFD.
+        /// Checks against both DATs (persisted) and currently loaded cells (in-memory).
+        /// </summary>
+        public ushort AllocateCellId(uint lbId) {
+            var lbKey = (ushort)(lbId & 0xFFFF);
+            HashSet<ushort> usedIds = new();
+
+            // Collect used IDs from loaded cells
+            if (_loadedCells.TryGetValue(lbKey, out var cells)) {
+                foreach (var cell in cells) {
+                    usedIds.Add((ushort)(cell.CellId & 0xFFFF));
+                }
+            }
+
+            // Scan range 0x0100 (256) to 0xFFFD (65533)
+            for (ushort id = 0x0100; id <= 0xFFFD; id++) {
+                if (usedIds.Contains(id)) continue;
+
+                uint fullId = (lbId << 16) | id;
+                if (!_dats.TryGet<EnvCell>(fullId, out _)) {
+                    return id;
+                }
+            }
+            throw new InvalidOperationException($"No available EnvCell IDs in landblock 0x{lbId:X4}");
+        }
+
+        #endregion
+
         #region Landblock Management
 
         /// <summary>
@@ -768,6 +842,7 @@ namespace WorldBuilder.Editors.Landscape {
     /// A loaded dungeon cell instance with its world transform and reference to shared GPU data.
     /// </summary>
     public class LoadedEnvCell {
+        public uint CellId { get; set; }
         public EnvCellGpuKey GpuKey { get; set; }
         public Matrix4x4 WorldTransform { get; set; }
         /// <summary>World-space position for frustum culling.</summary>
@@ -791,6 +866,7 @@ namespace WorldBuilder.Editors.Landscape {
     /// CPU-prepared data for a single EnvCell, ready for GPU upload.
     /// </summary>
     public class PreparedEnvCell {
+        public uint CellId { get; set; }
         public EnvCellGpuKey GpuKey { get; set; }
         public Matrix4x4 WorldTransform { get; set; }
         /// <summary>World-space position for frustum culling.</summary>
