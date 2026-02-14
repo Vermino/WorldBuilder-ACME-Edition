@@ -72,8 +72,8 @@ namespace WorldBuilder.Editors.Landscape.Views {
         }
 
         private void OnDragOver(object? sender, DragEventArgs e) {
-            var panel = e.Data.Get("DockablePanel");
-            if (panel == null) {
+            var id = e.Data.Get("DockablePanelId") as string;
+            if (string.IsNullOrEmpty(id)) {
                 e.DragEffects = DragDropEffects.None;
                 return;
             }
@@ -112,10 +112,13 @@ namespace WorldBuilder.Editors.Landscape.Views {
 
         private void OnDrop(object? sender, DragEventArgs e) {
             HideGhosts();
-            var panel = e.Data.Get("DockablePanel") as IDockable;
-            if (panel == null) return;
+            var id = e.Data.Get("DockablePanelId") as string;
+            if (string.IsNullOrEmpty(id)) return;
 
             if (_viewModel?.DockingManager == null) return;
+
+            var panel = _viewModel.DockingManager.AllPanels.FirstOrDefault(p => p.Id == id);
+            if (panel == null) return;
 
             var pos = e.GetPosition(this);
             var bounds = Bounds;

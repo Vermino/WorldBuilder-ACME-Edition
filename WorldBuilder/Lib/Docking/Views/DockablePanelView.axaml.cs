@@ -32,9 +32,10 @@ namespace WorldBuilder.Lib.Docking {
         private async void DockDragHandle_PointerPressed(object? sender, PointerPressedEventArgs e) {
             if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) {
                 var dragData = new DataObject();
-                // Pass the ViewModel as the data
-                if (DataContext != null) {
-                    dragData.Set("DockablePanel", DataContext);
+
+                // Pass ID instead of object reference to be safe across windows
+                if (DataContext is DockablePanelViewModel vm) {
+                    dragData.Set("DockablePanelId", vm.Id);
 
                     var result = await DragDrop.DoDragDrop(e, dragData, DragDropEffects.Move);
                 }
