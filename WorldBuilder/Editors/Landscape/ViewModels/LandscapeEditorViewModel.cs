@@ -342,7 +342,7 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             if (source == pCam) {
                 // Sync Ortho to Perspective (Focus point)
                 // Raycast from perspective camera to ground to find focal point
-                var forward = pCam.GetForwardVector();
+                var forward = pCam.Front;
 
                 // Plane intersection with Z = current ortho view height (approximate terrain level if we don't have exact raycast)
                 // Or simply intersect with Z=0 plane if Z is absolute.
