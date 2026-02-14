@@ -69,13 +69,16 @@ namespace WorldBuilder.Editors.Landscape.Commands {
             var modifiedLandblocks = _context.TerrainSystem.UpdateLandblocksBatch(Field, batchChanges);
             _context.MarkLandblocksModified(modifiedLandblocks);
 
-            // On first execution, compute how static objects should move with the terrain
-            if (collectObjectChanges) {
-                ComputeStaticObjectChanges();
+            // Only compute/apply static object height adjustments for Height field changes.
+            // Other fields (Type, Road, Scenery) don't affect terrain geometry, so objects
+            // don't need Z-position updates. Skipping avoids loading uncached landblock
+            // documents during texture painting, which was a deadlock risk.
+            if (Field == TerrainField.Height) {
+                if (collectObjectChanges) {
+                    ComputeStaticObjectChanges();
+                }
+                ApplyStaticObjectChanges(isUndo);
             }
-
-            // Apply static object height adjustments
-            ApplyStaticObjectChanges(isUndo);
 
             return true;
         }

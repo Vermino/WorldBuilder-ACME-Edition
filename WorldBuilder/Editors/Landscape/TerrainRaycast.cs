@@ -1,4 +1,4 @@
-﻿using Chorizite.Core.Lib;
+using Chorizite.Core.Lib;
 using DatReaderWriter.DBObjs;
 using System;
 using System.Collections.Generic;
@@ -80,6 +80,9 @@ namespace WorldBuilder.Editors.Landscape {
             return TraverseLandblocks(rayOrigin, rayDirection, terrainSystem);
         }
 
+        // Reusable vertex buffer to avoid per-cell allocations during raycast
+        [ThreadStatic] private static Vector3[]? _vertexBuffer;
+
         private static TerrainRaycastHit TraverseLandblocks(
             Vector3 rayOrigin,
             Vector3 rayDirection,
@@ -89,6 +92,9 @@ namespace WorldBuilder.Editors.Landscape {
 
             const float maxDistance = 80000f;
             const float landblockSize = 192f;
+            // Cap traversal to prevent UI thread starvation when raycasting at great distances.
+            // 150 landblocks ≈ 28,800 world units — well beyond any practical render distance.
+            const int maxStepsCap = 150;
 
             Vector3 rayEnd = rayOrigin + rayDirection * maxDistance;
 
@@ -116,7 +122,12 @@ namespace WorldBuilder.Editors.Landscape {
 
             float closestDistance = float.MaxValue;
 
-            int maxSteps = Math.Max(Math.Abs(endLbX - startLbX), Math.Abs(endLbY - startLbY)) + 1;
+            // Fix: DDA with side-distance tracking needs |dx|+|dy| steps (each step moves
+            // in only one axis), not max(|dx|,|dy|). Cap to prevent excessive traversal.
+            int maxSteps = Math.Min(
+                Math.Abs(endLbX - startLbX) + Math.Abs(endLbY - startLbY) + 1,
+                maxStepsCap);
+
             for (int step = 0; step < maxSteps; step++) {
                 if (currentLbX >= 0 && currentLbX < TerrainDataManager.MapSize &&
                     currentLbY >= 0 && currentLbY < TerrainDataManager.MapSize) {
@@ -179,44 +190,59 @@ namespace WorldBuilder.Editors.Landscape {
             uint hitCellY = 0;
             Vector3 hitPosition = Vector3.Zero;
 
-            var cellsToCheck = GetCellTraversalOrder(rayOrigin, rayDirection, baseLandblockX, baseLandblockY);
+            // Use ray entry/exit points to determine which cells to test, rather than
+            // sorting all 64 cells by distance. This reduces per-landblock work from
+            // 64 cells to only the cells the ray actually passes through.
+            GetCellRange(rayOrigin, rayDirection, baseLandblockX, baseLandblockY, tMin, tMax,
+                out int minCellX, out int maxCellX, out int minCellY, out int maxCellY);
 
-            foreach (var (cellX, cellY) in cellsToCheck) {
-                Vector3[] vertices = GenerateCellVertices(
-                    baseLandblockX, baseLandblockY, cellX, cellY,
-                    landblockData, terrainSystem.Region);
+            // Reuse a single vertex buffer to avoid allocating Vector3[4] for every cell
+            var vertices = _vertexBuffer ??= new Vector3[4];
 
-                BoundingBox cellBounds = CalculateCellBounds(vertices);
-                if (!RayIntersectsBox(rayOrigin, rayDirection, cellBounds, out float cellTMin, out float cellTMax)) {
-                    continue;
-                }
+            for (int cy = minCellY; cy <= maxCellY; cy++) {
+                for (int cx = minCellX; cx <= maxCellX; cx++) {
+                    uint cellX = (uint)cx;
+                    uint cellY = (uint)cy;
 
-                if (cellTMin > closestDistance) continue;
+                    GenerateCellVerticesInPlace(
+                        baseLandblockX, baseLandblockY, cellX, cellY,
+                        landblockData, terrainSystem.Region, vertices);
 
-                var splitDiagonal = TerrainGeometryGenerator.CalculateSplitDirection(landblockX, cellX, landblockY, cellY);
+                    BoundingBox cellBounds = CalculateCellBounds(vertices);
+                    if (!RayIntersectsBox(rayOrigin, rayDirection, cellBounds, out float cellTMin, out float cellTMax)) {
+                        continue;
+                    }
 
-                Vector3[] triangle1 = splitDiagonal == CellSplitDirection.SEtoNW
-                    ? new[] { vertices[0], vertices[1], vertices[2] }
-                    : new[] { vertices[0], vertices[1], vertices[3] };
+                    if (cellTMin > closestDistance) continue;
 
-                Vector3[] triangle2 = splitDiagonal == CellSplitDirection.SEtoNW
-                    ? new[] { vertices[0], vertices[2], vertices[3] }
-                    : new[] { vertices[1], vertices[2], vertices[3] };
+                    var splitDiagonal = TerrainGeometryGenerator.CalculateSplitDirection(landblockX, cellX, landblockY, cellY);
 
-                if (RayIntersectsTriangle(rayOrigin, rayDirection, triangle1, out float t1, out Vector3 p1) && t1 < closestDistance) {
-                    closestDistance = t1;
-                    hitPosition = p1;
-                    hitCellX = cellX;
-                    hitCellY = cellY;
-                    hit.Hit = true;
-                }
+                    // Test triangles using individual vertex refs instead of allocating arrays
+                    Vector3 t1v0, t1v1, t1v2, t2v0, t2v1, t2v2;
+                    if (splitDiagonal == CellSplitDirection.SEtoNW) {
+                        t1v0 = vertices[0]; t1v1 = vertices[1]; t1v2 = vertices[2];
+                        t2v0 = vertices[0]; t2v1 = vertices[2]; t2v2 = vertices[3];
+                    }
+                    else {
+                        t1v0 = vertices[0]; t1v1 = vertices[1]; t1v2 = vertices[3];
+                        t2v0 = vertices[1]; t2v1 = vertices[2]; t2v2 = vertices[3];
+                    }
 
-                if (RayIntersectsTriangle(rayOrigin, rayDirection, triangle2, out float t2, out Vector3 p2) && t2 < closestDistance) {
-                    closestDistance = t2;
-                    hitPosition = p2;
-                    hitCellX = cellX;
-                    hitCellY = cellY;
-                    hit.Hit = true;
+                    if (RayIntersectsTriangle(rayOrigin, rayDirection, t1v0, t1v1, t1v2, out float t1, out Vector3 p1) && t1 < closestDistance) {
+                        closestDistance = t1;
+                        hitPosition = p1;
+                        hitCellX = cellX;
+                        hitCellY = cellY;
+                        hit.Hit = true;
+                    }
+
+                    if (RayIntersectsTriangle(rayOrigin, rayDirection, t2v0, t2v1, t2v2, out float t2, out Vector3 p2) && t2 < closestDistance) {
+                        closestDistance = t2;
+                        hitPosition = p2;
+                        hitCellX = cellX;
+                        hitCellY = cellY;
+                        hit.Hit = true;
+                    }
                 }
             }
 
@@ -229,12 +255,13 @@ namespace WorldBuilder.Editors.Landscape {
             return hit;
         }
 
-        private static Vector3[] GenerateCellVertices(
+        /// <summary>
+        /// Fills a pre-allocated vertex buffer with cell corner positions (avoids allocation).
+        /// </summary>
+        private static void GenerateCellVerticesInPlace(
             float baseLandblockX, float baseLandblockY,
             uint cellX, uint cellY,
-            TerrainEntry[] landblockData, Region region) {
-
-            var vertices = new Vector3[4];
+            TerrainEntry[] landblockData, Region region, Vector3[] vertices) {
 
             var bottomLeft = GetTerrainEntryForCell(landblockData, cellX, cellY);
             var bottomRight = GetTerrainEntryForCell(landblockData, cellX + 1, cellY);
@@ -264,31 +291,43 @@ namespace WorldBuilder.Editors.Landscape {
                 baseLandblockY + (cellY + 1) * 24f,
                 region.LandDefs.LandHeightTable[topLeft.Height]
             );
-
-            return vertices;
         }
 
-        private static IEnumerable<(uint cellX, uint cellY)> GetCellTraversalOrder(
+        /// <summary>
+        /// Computes the cell rectangle that the ray passes through within a landblock,
+        /// using the ray's entry/exit points from the landblock bounding box intersection.
+        /// This replaces sorting all 64 cells by distance — typically reduces to 5-15 cells.
+        /// </summary>
+        private static void GetCellRange(
             Vector3 rayOrigin, Vector3 rayDirection,
-            float baseLandblockX, float baseLandblockY) {
+            float baseLandblockX, float baseLandblockY,
+            float tMin, float tMax,
+            out int minCellX, out int maxCellX, out int minCellY, out int maxCellY) {
 
-            float cellSize = 24f;
-            var cellDistances = new List<(uint cellX, uint cellY, float distance)>();
+            const float cellSize = 24f;
+            const int maxCell = (int)TerrainDataManager.LandblockEdgeCellCount - 1; // 7
 
-            for (uint cellY = 0; cellY < TerrainDataManager.LandblockEdgeCellCount; cellY++) {
-                for (uint cellX = 0; cellX < TerrainDataManager.LandblockEdgeCellCount; cellX++) {
-                    float cellCenterX = baseLandblockX + (cellX + 0.5f) * cellSize;
-                    float cellCenterY = baseLandblockY + (cellY + 0.5f) * cellSize;
-                    Vector3 cellCenter = new Vector3(cellCenterX, cellCenterY, rayOrigin.Z);
-                    float distance = Vector3.Distance(rayOrigin, cellCenter);
-                    cellDistances.Add((cellX, cellY, distance));
-                }
-            }
+            // Compute ray entry and exit points in world space
+            Vector3 entryPoint = rayOrigin + rayDirection * Math.Max(tMin, 0f);
+            Vector3 exitPoint = rayOrigin + rayDirection * tMax;
 
-            cellDistances.Sort((a, b) => a.distance.CompareTo(b.distance));
-            foreach (var (cellX, cellY, _) in cellDistances) {
-                yield return (cellX, cellY);
-            }
+            // Convert to cell coordinates within the landblock
+            int entryCellX = (int)Math.Floor((entryPoint.X - baseLandblockX) / cellSize);
+            int entryCellY = (int)Math.Floor((entryPoint.Y - baseLandblockY) / cellSize);
+            int exitCellX = (int)Math.Floor((exitPoint.X - baseLandblockX) / cellSize);
+            int exitCellY = (int)Math.Floor((exitPoint.Y - baseLandblockY) / cellSize);
+
+            // Clamp to valid cell range [0, 7]
+            entryCellX = Math.Clamp(entryCellX, 0, maxCell);
+            entryCellY = Math.Clamp(entryCellY, 0, maxCell);
+            exitCellX = Math.Clamp(exitCellX, 0, maxCell);
+            exitCellY = Math.Clamp(exitCellY, 0, maxCell);
+
+            // Build the rectangle that covers both entry and exit cells
+            minCellX = Math.Min(entryCellX, exitCellX);
+            maxCellX = Math.Max(entryCellX, exitCellX);
+            minCellY = Math.Min(entryCellY, exitCellY);
+            maxCellY = Math.Max(entryCellY, exitCellY);
         }
 
         private static BoundingBox CalculateCellBounds(Vector3[] vertices) {
@@ -331,13 +370,9 @@ namespace WorldBuilder.Editors.Landscape {
             return true;
         }
 
-        private static bool RayIntersectsTriangle(Vector3 origin, Vector3 direction, Vector3[] vertices, out float t, out Vector3 intersectionPoint) {
+        private static bool RayIntersectsTriangle(Vector3 origin, Vector3 direction, Vector3 v0, Vector3 v1, Vector3 v2, out float t, out Vector3 intersectionPoint) {
             t = 0;
             intersectionPoint = Vector3.Zero;
-
-            Vector3 v0 = vertices[0];
-            Vector3 v1 = vertices[1];
-            Vector3 v2 = vertices[2];
 
             Vector3 edge1 = v1 - v0;
             Vector3 edge2 = v2 - v0;

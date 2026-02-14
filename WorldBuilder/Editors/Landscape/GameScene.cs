@@ -49,6 +49,7 @@ namespace WorldBuilder.Editors.Landscape {
 
         private readonly Dictionary<ushort, List<StaticObject>> _sceneryObjects = new();
         private readonly Dictionary<ushort, List<StaticObject>> _dungeonStaticObjects = new();
+        private readonly Dictionary<ushort, List<StaticObject>> _buildingStaticObjects = new();
         internal readonly TerrainSystem _terrainSystem;
 
         private const float WarmUpTimeBudgetMs = 12f;
@@ -63,6 +64,7 @@ namespace WorldBuilder.Editors.Landscape {
         private bool _cachedShowStaticObjects = true;
         private bool _cachedShowScenery = true;
         private bool _cachedShowDungeons = true;
+        private ushort? _cachedFocusedDungeonLB = null;
 
         // Reusable collections
         private readonly Dictionary<(uint Id, bool IsSetup), List<Matrix4x4>> _objectGroupBuffer = new();
@@ -303,13 +305,25 @@ namespace WorldBuilder.Editors.Landscape {
                 if (result.EnvCellBatch != null) {
                     foreach (var context in _contexts.Values) {
                         context.EnvCellManager.QueueForUpload(result.EnvCellBatch);
+                    }
 
-                        if (result.EnvCellBatch.DungeonStaticObjects.Count > 0) {
-                            if (context == _contexts.Values.First()) {
-                                _dungeonStaticObjects[result.LbKey] = result.EnvCellBatch.DungeonStaticObjects;
-                            }
-
+                    // Add dungeon static objects (only shown when dungeon is focused)
+                    if (result.EnvCellBatch.DungeonStaticObjects.Count > 0) {
+                        _dungeonStaticObjects[result.LbKey] = result.EnvCellBatch.DungeonStaticObjects;
+                        foreach (var context in _contexts.Values) {
                             foreach (var obj in result.EnvCellBatch.DungeonStaticObjects) {
+                                if (context.ObjectManager.TryGetCachedRenderData(obj.Id) == null && !context.ObjectManager.IsKnownFailure(obj.Id)) {
+                                    context.ModelWarmupQueue.Enqueue((obj.Id, obj.IsSetup));
+                                }
+                            }
+                        }
+                    }
+
+                    // Add building interior static objects (always shown with regular statics)
+                    if (result.EnvCellBatch.BuildingStaticObjects.Count > 0) {
+                        _buildingStaticObjects[result.LbKey] = result.EnvCellBatch.BuildingStaticObjects;
+                        foreach (var context in _contexts.Values) {
+                            foreach (var obj in result.EnvCellBatch.BuildingStaticObjects) {
                                 if (context.ObjectManager.TryGetCachedRenderData(obj.Id) == null && !context.ObjectManager.IsKnownFailure(obj.Id)) {
                                     context.ModelWarmupQueue.Enqueue((obj.Id, obj.IsSetup));
                                 }
@@ -409,7 +423,10 @@ namespace WorldBuilder.Editors.Landscape {
                                         }
                                     }
                                     if (envCells.Count > 0) {
-                                        envCellBatch = envCellManager.PrepareLandblockEnvCells(lbKey, lbId, envCells);
+                                        // Dungeon-only landblocks have cells but no buildings.
+                                        // Building interiors have cells AND buildings on the surface.
+                                        bool isDungeonOnly = lbi.Buildings == null || lbi.Buildings.Count == 0;
+                                        envCellBatch = envCellManager.PrepareLandblockEnvCells(lbKey, lbId, envCells, isDungeonOnly);
                                     }
                                 }
                             }
@@ -476,6 +493,14 @@ namespace WorldBuilder.Editors.Landscape {
                         }
                         _dungeonStaticObjects.Remove(lbKey);
                     }
+                    if (_buildingStaticObjects.TryGetValue(lbKey, out var buildingObjs)) {
+                        foreach (var obj in buildingObjs) {
+                            foreach (var context in _contexts.Values) {
+                                context.ObjectManager.ReleaseRenderData(obj.Id, obj.IsSetup);
+                            }
+                        }
+                        _buildingStaticObjects.Remove(lbKey);
+                    }
 
                     _ = _documentManager.CloseDocumentAsync(docId);
                     _staticObjectsDirty = true;
@@ -517,6 +542,14 @@ namespace WorldBuilder.Editors.Landscape {
                         }
                     }
                     _dungeonStaticObjects.Remove(lbKey);
+                }
+                if (_buildingStaticObjects.TryGetValue(lbKey, out var buildingObjs2)) {
+                    foreach (var obj in buildingObjs2) {
+                        foreach (var context in _contexts.Values) {
+                            context.ObjectManager.ReleaseRenderData(obj.Id, obj.IsSetup);
+                        }
+                    }
+                    _buildingStaticObjects.Remove(lbKey);
                 }
                 _staticObjectsDirty = true;
             }
@@ -1009,10 +1042,12 @@ namespace WorldBuilder.Editors.Landscape {
         public int GetVisibleChunkCount(Frustum frustum, SceneContext context) => GetRenderableChunks(frustum, context).Count();
 
         public IEnumerable<StaticObject> GetAllStaticObjects() {
+            var focusedLB = _contexts.Values.FirstOrDefault()?.EnvCellManager.FocusedDungeonLB;
             if (_staticObjectsDirty || _cachedStaticObjects == null
                 || _cachedShowStaticObjects != ShowStaticObjects
                 || _cachedShowScenery != ShowScenery
-                || _cachedShowDungeons != ShowDungeons) {
+                || _cachedShowDungeons != ShowDungeons
+                || _cachedFocusedDungeonLB != focusedLB) {
                 var statics = new List<StaticObject>();
                 if (ShowStaticObjects) {
                     foreach (var doc in _documentManager.ActiveDocs.Values.OfType<LandblockDocument>()) {
@@ -1022,13 +1057,24 @@ namespace WorldBuilder.Editors.Landscape {
                 if (ShowScenery) {
                     statics.AddRange(_sceneryObjects.Values.SelectMany(x => x));
                 }
+                // Building interior statics show when Dungeons toggle is on
+                // (same toggle that reveals interior EnvCell geometry).
                 if (ShowDungeons) {
-                    statics.AddRange(_dungeonStaticObjects.Values.SelectMany(x => x));
+                    statics.AddRange(_buildingStaticObjects.Values.SelectMany(x => x));
+                }
+                // Dungeon statics only show when a specific dungeon is focused,
+                // otherwise they render as floating objects in the overworld view.
+                if (ShowDungeons && focusedLB.HasValue) {
+                    foreach (var kvp in _dungeonStaticObjects) {
+                        if (kvp.Key != focusedLB.Value) continue;
+                        statics.AddRange(kvp.Value);
+                    }
                 }
                 _cachedStaticObjects = statics;
                 _cachedShowStaticObjects = ShowStaticObjects;
                 _cachedShowScenery = ShowScenery;
                 _cachedShowDungeons = ShowDungeons;
+                _cachedFocusedDungeonLB = focusedLB;
                 _staticObjectsDirty = false;
             }
             return _cachedStaticObjects;
@@ -1098,7 +1144,15 @@ namespace WorldBuilder.Editors.Landscape {
             var frustum = new Frustum(viewProjection);
             var renderableChunks = GetRenderableChunks(frustum, context);
 
+            // Render terrain (with brush preview).
+            // Terrain is pushed furthest back in the depth priority chain:
+            //   Terrain (2,2) < Building EnvCells (1,1) < Static objects (0)
+            // This ensures interior floors win over terrain, while exterior
+            // GfxObj models win over interior EnvCell walls/ceilings.
+            gl.Enable(EnableCap.PolygonOffsetFill);
+            gl.PolygonOffset(2f, 2f);
             RenderTerrain(context, renderableChunks, model, camera, cameraDistance, width, height, editingContext);
+            gl.Disable(EnableCap.PolygonOffsetFill);
 
             if (editingContext.ActiveVertices.Count > 0) {
                 RenderActiveSpheres(context, editingContext, camera, model, viewProjection);
@@ -1147,9 +1201,10 @@ namespace WorldBuilder.Editors.Landscape {
                 Console.WriteLine($"[GameScene.Render] Static objects: {renderStaticsMs}ms ({visibleObjects.Count} objects)");
             }
 
-            if (ShowDungeons) {
-                context.EnvCellManager.Render(viewProjection, camera, LightDirection, AmbientLightIntensity, SpecularPower);
-            }
+            // Render EnvCell geometry ? building interiors always render,
+            // dungeon cells are gated by ShowDungeons toggle + focus filter.
+            context.EnvCellManager.ShowDungeonCells = ShowDungeons;
+            context.EnvCellManager.Render(viewProjection, camera, LightDirection, AmbientLightIntensity, SpecularPower);
 
             if (editingContext.ObjectSelection.HasSelection) {
                 RenderSelectionHighlight(context, editingContext.ObjectSelection, camera, viewProjection);
@@ -1166,6 +1221,49 @@ namespace WorldBuilder.Editors.Landscape {
             if (!selection.HasSelection) return;
             var gl = context.Renderer.GraphicsDevice.GL;
 
+            // EnvCell (dungeon cell) highlight ? use cell bounding box corners
+            if (selection.HasEnvCellSelection) {
+                var cell = selection.SelectedEnvCell!;
+                float r = EnvCellManager.CellBoundsRadius;
+                float sphereR = r * 0.08f; // proportional sphere size
+                var pos = cell.WorldPosition;
+                var cellCorners = new List<Vector4>();
+
+                // 8 corners of the bounding box
+                for (int cx = -1; cx <= 1; cx += 2)
+                    for (int cy = -1; cy <= 1; cy += 2)
+                        for (int cz = -1; cz <= 1; cz += 2)
+                            cellCorners.Add(new Vector4(pos.X + cx * r, pos.Y + cy * r, pos.Z + cz * r, sphereR));
+
+                gl.Enable(EnableCap.Blend);
+                gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                context.SphereShader.Bind();
+                context.SphereShader.SetUniform("uViewProjection", viewProjection);
+                context.SphereShader.SetUniform("uCameraPosition", camera.Position);
+                context.SphereShader.SetUniform("uSphereColor", new Vector3(0.0f, 0.8f, 1.0f)); // Cyan for dungeon cells
+                context.SphereShader.SetUniform("uLightDirection", Vector3.Normalize(LightDirection));
+                context.SphereShader.SetUniform("uAmbientIntensity", 0.8f);
+                context.SphereShader.SetUniform("uSpecularPower", SpecularPower);
+                context.SphereShader.SetUniform("uGlowColor", new Vector3(0.0f, 0.8f, 1.0f));
+                context.SphereShader.SetUniform("uGlowIntensity", 2.0f);
+                context.SphereShader.SetUniform("uGlowPower", 0.3f);
+
+                var cellArray = cellCorners.ToArray();
+                gl.BindBuffer(GLEnum.ArrayBuffer, context.SphereInstanceVBO);
+                unsafe {
+                    fixed (Vector4* ptr = cellArray) {
+                        gl.BufferData(GLEnum.ArrayBuffer, (nuint)(cellArray.Length * sizeof(Vector4)), ptr, GLEnum.DynamicDraw);
+                    }
+                }
+                gl.BindVertexArray(context.SphereVAO);
+                gl.DrawElementsInstanced(GLEnum.Triangles, (uint)context.SphereIndexCount, GLEnum.UnsignedInt, null, (uint)cellArray.Length);
+                gl.BindVertexArray(0);
+                gl.UseProgram(0);
+                gl.Disable(EnableCap.Blend);
+                return; // EnvCell selection handled, skip static object highlight
+            }
+
+            // Collect corners for all selected objects, with per-object sphere radius
             var allInstances = new List<Vector4>();
             foreach (var entry in selection.SelectedEntries.ToList()) {
                 var obj = entry.Object;

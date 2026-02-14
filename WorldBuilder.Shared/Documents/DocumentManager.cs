@@ -1,4 +1,4 @@
-﻿using DatReaderWriter;
+using DatReaderWriter;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
@@ -104,7 +104,10 @@ namespace WorldBuilder.Shared.Documents {
             }
 
             try {
-                var dbDoc = await DocumentStorageService.GetDocumentAsync(documentId);
+                // ConfigureAwait(false) on all awaits to prevent deadlocks when this method
+                // is called via .GetAwaiter().GetResult() from the UI thread (e.g. during
+                // terrain painting finalization, raycast GetLandblockTerrain, etc.).
+                var dbDoc = await DocumentStorageService.GetDocumentAsync(documentId).ConfigureAwait(false);
                 var docInstance = (BaseDocument?)Activator.CreateInstance(docType, _logger);
 
                 if (docInstance == null) {
@@ -117,7 +120,7 @@ namespace WorldBuilder.Shared.Documents {
 
                 if (dbDoc == null) {
                     dbDoc = await DocumentStorageService.CreateDocumentAsync(documentId, docTypeName,
-                        docInstance.SaveToProjection());
+                        docInstance.SaveToProjection()).ConfigureAwait(false);
                     _logger.LogInformation("Creating new Document {DocumentId}({Type})", documentId, docTypeName);
                 }
                 else {
@@ -127,7 +130,7 @@ namespace WorldBuilder.Shared.Documents {
                     }
                 }
 
-                if (!await docInstance.InitAsync(Dats, this)) {
+                if (!await docInstance.InitAsync(Dats, this).ConfigureAwait(false)) {
                     _logger.LogError("Failed to init document {DocumentId} of type {Type}", documentId, docTypeName);
                     return null;
                 }
