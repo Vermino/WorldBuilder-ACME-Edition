@@ -1,5 +1,4 @@
 using Silk.NET.OpenGL;
-using Chorizite.OpenGLSDLBackend;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -17,8 +16,7 @@ namespace WorldBuilder.Editors.Landscape {
         public const int ThumbnailSize = 96;
         private const float TimeBudgetMs = 4f;
 
-        private readonly OpenGLRenderer _renderer;
-        private GL _gl => _renderer.GraphicsDevice.GL;
+        private readonly GL _gl;
         private readonly StaticObjectManager _objectManager;
 
         // Offscreen FBO resources
@@ -43,8 +41,8 @@ namespace WorldBuilder.Editors.Landscape {
         private const float AmbientIntensity = 0.6f;
         private const float SpecularPower = 32f;
 
-        public ThumbnailRenderService(OpenGLRenderer renderer, StaticObjectManager objectManager) {
-            _renderer = renderer;
+        public ThumbnailRenderService(GL gl, StaticObjectManager objectManager) {
+            _gl = gl;
             _objectManager = objectManager;
         }
 
@@ -65,10 +63,7 @@ namespace WorldBuilder.Editors.Landscape {
         /// Must be called at the end of the Render() pass on the GL thread,
         /// when the GL context is in a known-good state from the main scene's rendering.
         /// </summary>
-        public unsafe void ProcessQueue(OpenGLRenderer currentRenderer) {
-            // Only process if we are on the correct context
-            if (currentRenderer != _renderer) return;
-
+        public unsafe void ProcessQueue() {
             if (_queue.Count == 0) return;
 
             EnsureFBO();
