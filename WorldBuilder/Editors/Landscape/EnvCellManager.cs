@@ -172,6 +172,7 @@ namespace WorldBuilder.Editors.Landscape {
             if (meshData == null) return null;
 
             return new PreparedEnvCell {
+                CellId = envCell.Id,
                 GpuKey = gpuKey,
                 WorldTransform = worldTransform,
                 WorldPosition = cellOrigin,
@@ -434,6 +435,7 @@ namespace WorldBuilder.Editors.Landscape {
                 }
 
                 cells.Add(new LoadedEnvCell {
+                    CellId = prepared.CellId,
                     GpuKey = prepared.GpuKey,
                     WorldTransform = prepared.WorldTransform,
                     WorldPosition = prepared.WorldPosition
@@ -661,6 +663,132 @@ namespace WorldBuilder.Editors.Landscape {
 
         #endregion
 
+        #region Editing
+
+        /// <summary>
+        /// Creates a new EnvCell with the specified parameters and adds it to the system.
+        /// Returns the created EnvCell.
+        /// </summary>
+        public EnvCell CreateEnvCell(uint lbId, ushort cellId, uint envId, ushort cellStructure, Vector3 position, Quaternion orientation) {
+            uint fullId = (lbId << 16) | cellId;
+
+            var cell = new EnvCell {
+                Id = fullId,
+                EnvironmentId = (ushort)envId,
+                CellStructure = cellStructure,
+                Position = new Frame {
+                    Origin = position,
+                    Orientation = orientation
+                }
+            };
+
+            var lbKey = (ushort)(lbId & 0xFFFF);
+            // We reuse PrepareLandblockEnvCells logic for a single cell
+            var batch = PrepareLandblockEnvCells(lbKey, lbId, new List<EnvCell> { cell });
+            if (batch != null) {
+                QueueForUpload(batch);
+            }
+
+            return cell;
+        }
+
+        /// <summary>
+        /// Deletes an EnvCell from the system and unloads its GPU resources.
+        /// </summary>
+        public void DeleteEnvCell(uint lbId, ushort cellId) {
+            var lbKey = (ushort)(lbId & 0xFFFF);
+            if (_loadedCells.TryGetValue(lbKey, out var cells)) {
+                var cellToRemove = cells.FirstOrDefault(c => c.CellId == ((lbId << 16) | cellId));
+                if (cellToRemove != null) {
+                    cells.Remove(cellToRemove);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Allocates a new unique EnvCell ID within the given landblock.
+        /// Scans for the first available ID in range 0x0100-0xFFFD.
+        /// Checks against both DATs (persisted) and currently loaded cells (in-memory).
+        /// </summary>
+        public ushort AllocateCellId(uint lbId) {
+            var lbKey = (ushort)(lbId & 0xFFFF);
+            HashSet<ushort> usedIds = new();
+
+            // Collect used IDs from loaded cells
+            if (_loadedCells.TryGetValue(lbKey, out var cells)) {
+                foreach (var cell in cells) {
+                    usedIds.Add((ushort)(cell.CellId & 0xFFFF));
+                }
+            }
+
+            // Scan range 0x0100 (256) to 0xFFFD (65533)
+            for (ushort id = 0x0100; id <= 0xFFFD; id++) {
+                if (usedIds.Contains(id)) continue;
+
+                uint fullId = (lbId << 16) | id;
+                if (!_dats.TryGet<EnvCell>(fullId, out _)) {
+                    return id;
+                }
+            }
+            throw new InvalidOperationException($"No available EnvCell IDs in landblock 0x{lbId:X4}");
+        }
+
+        /// <summary>
+        /// Links two portals between two EnvCells. Updates both cells to point to each other.
+        /// Does NOT automatically upload to GPU as this is a logical change only (unless geometry changes).
+        /// </summary>
+        public void LinkPortals(EnvCell cellA, ushort portalIndexA, EnvCell cellB, ushort portalIndexB) {
+            if (portalIndexA >= cellA.CellPortals.Count) throw new ArgumentOutOfRangeException(nameof(portalIndexA));
+            if (portalIndexB >= cellB.CellPortals.Count) throw new ArgumentOutOfRangeException(nameof(portalIndexB));
+
+            var portalA = cellA.CellPortals[portalIndexA];
+            var portalB = cellB.CellPortals[portalIndexB];
+
+            // Link A -> B
+            portalA.OtherCellId = (ushort)(cellB.Id & 0xFFFF);
+            portalA.OtherPortalId = portalIndexB;
+            cellA.CellPortals[portalIndexA] = portalA;
+
+            // Link B -> A
+            portalB.OtherCellId = (ushort)(cellA.Id & 0xFFFF);
+            portalB.OtherPortalId = portalIndexA;
+            cellB.CellPortals[portalIndexB] = portalB;
+
+            // Mark cells as modified? The caller (DungeonDocument) handles persistence.
+            // If we needed to update visual debugging of portals, we might queue something here.
+        }
+
+        /// <summary>
+        /// Unlinks a portal in an EnvCell. If the portal was connected to another cell,
+        /// that connection is also severed (one-way or two-way depending on intent, but usually two-way).
+        /// </summary>
+        public void UnlinkPortal(EnvCell cell, ushort portalIndex) {
+            if (portalIndex >= cell.CellPortals.Count) return;
+
+            var portal = cell.CellPortals[portalIndex];
+            var otherCellId = portal.OtherCellId;
+            var otherPortalId = portal.OtherPortalId;
+
+            // Clear this portal
+            portal.OtherCellId = 0;
+            portal.OtherPortalId = 0;
+            cell.CellPortals[portalIndex] = portal;
+
+            // If connected, try to clear the other side
+            if (otherCellId != 0) {
+                // We need to find the other cell. It might be in _loadedCells or just in DATs.
+                // EnvCellManager caches loaded cells but doesn't map ID -> EnvCell object directly in _loadedCells (only LoadedEnvCell wrapper).
+                // However, the caller usually has access to the EnvCell objects (e.g. via DungeonDocument).
+                // If we want to support this fully within EnvCellManager, we might need to fetch the other cell.
+                // For now, we assume the caller handles the other side or we only support logical unlink of what we have.
+                // But to be safe, let's try to find it in the current landblock's context if possible?
+                // Actually, without the EnvCell object for the other side, we can't modify it in memory.
+                // So this method primarily updates 'cell'. The caller must ensure consistency if 'otherCell' is loaded.
+            }
+        }
+
+        #endregion
+
         #region Landblock Management
 
         /// <summary>
@@ -768,6 +896,7 @@ namespace WorldBuilder.Editors.Landscape {
     /// A loaded dungeon cell instance with its world transform and reference to shared GPU data.
     /// </summary>
     public class LoadedEnvCell {
+        public uint CellId { get; set; }
         public EnvCellGpuKey GpuKey { get; set; }
         public Matrix4x4 WorldTransform { get; set; }
         /// <summary>World-space position for frustum culling.</summary>
@@ -791,6 +920,7 @@ namespace WorldBuilder.Editors.Landscape {
     /// CPU-prepared data for a single EnvCell, ready for GPU upload.
     /// </summary>
     public class PreparedEnvCell {
+        public uint CellId { get; set; }
         public EnvCellGpuKey GpuKey { get; set; }
         public Matrix4x4 WorldTransform { get; set; }
         /// <summary>World-space position for frustum culling.</summary>

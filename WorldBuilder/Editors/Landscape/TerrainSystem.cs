@@ -45,6 +45,7 @@ namespace WorldBuilder.Editors.Landscape {
             BaseDatDirectory = project.BaseDatDirectory;
 
             var collection = new ServiceCollection();
+            collection.AddLogging(l => l.AddProvider(new ColorConsoleLoggerProvider()));
             collection.AddSingleton(this);
             collection.AddSingleton<TerrainSystem>();
             collection.AddSingleton(EditingContext);
@@ -70,6 +71,8 @@ namespace WorldBuilder.Editors.Landscape {
             collection.AddSingleton(project);
             collection.AddSingleton(History ?? throw new ArgumentNullException(nameof(History)));
             collection.AddSingleton<HistorySnapshotPanelViewModel>();
+            collection.AddSingleton<AvailableLandblockFinder>();
+            collection.AddSingleton<AvailableLandblocksViewModel>();
             collection.AddTransient<PerspectiveCamera>();
             collection.AddTransient<OrthographicTopDownCamera>();
 

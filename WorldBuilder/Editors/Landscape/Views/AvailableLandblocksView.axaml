@@ -1,0 +1,26 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:WorldBuilder.Editors.Landscape.ViewModels"
+             mc:Ignorable="d" d:DesignWidth="300" d:DesignHeight="450"
+             x:Class="WorldBuilder.Editors.Landscape.Views.AvailableLandblocksView"
+             x:DataType="vm:AvailableLandblocksViewModel">
+  <Grid RowDefinitions="Auto, *, Auto">
+    <StackPanel Grid.Row="0" Spacing="10" Margin="10">
+      <Button Command="{Binding ScanCommand}" Content="Scan for Available Landblocks" HorizontalAlignment="Stretch"/>
+      <ProgressBar IsIndeterminate="False" Value="{Binding ScanProgress}" Maximum="100" IsVisible="{Binding IsScanning}"/>
+      <TextBlock Text="{Binding AvailableLandblocks.Count, StringFormat='Found: {0}'}" HorizontalAlignment="Center"/>
+    </StackPanel>
+
+    <ListBox Grid.Row="1" ItemsSource="{Binding AvailableLandblocks}" SelectedItem="{Binding SelectedLandblock}" SelectionMode="Single">
+      <ListBox.ItemTemplate>
+        <DataTemplate>
+          <TextBlock Text="{Binding StringFormat='0x{0:X4}'}"/>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <Button Grid.Row="2" Command="{Binding GoToSelectedCommand}" Content="Go To Selected" HorizontalAlignment="Stretch" Margin="10"/>
+  </Grid>
+</UserControl>

@@ -46,6 +46,9 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         private ObjectBrowserViewModel? _objectBrowser;
 
         [ObservableProperty]
+        private AvailableLandblocksViewModel? _availableLandblocksPanel;
+
+        [ObservableProperty]
         private TerrainTexturePaletteViewModel? _texturePalette;
 
         [ObservableProperty]
@@ -145,6 +148,8 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                 TerrainSystem.Scene.ThumbnailService);
             ObjectBrowser.PlacementRequested += OnPlacementRequested;
 
+            AvailableLandblocksPanel = TerrainSystem.Services.GetRequiredService<AvailableLandblocksViewModel>();
+
             TexturePalette = new TerrainTexturePaletteViewModel(TerrainSystem.Scene.SurfaceManager);
             TexturePalette.TextureSelected += OnPaletteTextureSelected;
 
@@ -202,6 +207,12 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                 }
                 DockingManager.RegisterPanel(panel);
             }
+        }
+
+        [RelayCommand]
+        public void ShowAvailableLandblocks() {
+            LeftPanelContent = AvailableLandblocksPanel;
+            LeftPanelTitle = "Available Landblocks";
         }
 
         private void RenderViewport(ViewportViewModel viewport, double deltaTime, Avalonia.PixelSize canvasSize, AvaloniaInputState inputState) {
