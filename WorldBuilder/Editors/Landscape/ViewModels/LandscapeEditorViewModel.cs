@@ -16,6 +16,7 @@ using System.Numerics;
 using System.Threading.Tasks;
 using WorldBuilder.Editors.Landscape;
 using WorldBuilder.Lib;
+using WorldBuilder.Lib.Docking;
 using WorldBuilder.Lib.Settings;
 using WorldBuilder.Shared.Documents;
 using DatReaderWriter.DBObjs;
@@ -55,6 +56,8 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
 
         [ObservableProperty]
         private string _currentPositionText = "";
+
+        public DockingManager DockingManager { get; } = new();
 
         // Overlay toggle properties (bound to toolbar buttons)
         public bool ShowGrid {
@@ -147,6 +150,32 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
 
             LeftPanelContent = ObjectBrowser;
             LeftPanelTitle = "Object Browser";
+
+            InitDocking();
+        }
+
+        private void InitDocking() {
+            var layouts = Settings.Landscape.UIState.DockingLayout;
+
+            void Register(string id, string title, object content, DockLocation defaultLoc) {
+                var panel = new DockablePanelViewModel(id, title, content, DockingManager);
+                var saved = layouts.FirstOrDefault(l => l.Id == id);
+                if (saved != null) {
+                    if (Enum.TryParse<DockLocation>(saved.Location, out var loc)) panel.Location = loc;
+                    panel.IsVisible = saved.IsVisible;
+                }
+                else {
+                    panel.Location = defaultLoc;
+                }
+                DockingManager.RegisterPanel(panel);
+            }
+
+            if (ObjectBrowser != null) Register("ObjectBrowser", "Object Browser", ObjectBrowser, DockLocation.Left);
+            if (TexturePalette != null) Register("TexturePalette", "Texture Palette", TexturePalette, DockLocation.Left);
+            if (LayersPanel != null) Register("Layers", "Layers", LayersPanel, DockLocation.Right);
+            if (HistorySnapshotPanel != null) Register("History", "History", HistorySnapshotPanel, DockLocation.Right);
+
+            Register("Toolbox", "Tools", new ToolboxViewModel(this), DockLocation.Right);
         }
 
         private void RenderViewport(ViewportViewModel viewport, double deltaTime, Avalonia.PixelSize canvasSize, AvaloniaInputState inputState) {
@@ -319,6 +348,9 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         }
 
         private void UpdateLeftPanel() {
+            var browserPanel = DockingManager.AllPanels.FirstOrDefault(p => p.Id == "ObjectBrowser");
+            var texturePanel = DockingManager.AllPanels.FirstOrDefault(p => p.Id == "TexturePalette");
+
             if (SelectedTool is TexturePaintingToolViewModel) {
                 // Sync palette to whatever the active sub-tool has selected
                 if (SelectedSubTool is BrushSubToolViewModel brush) {
@@ -327,10 +359,19 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                 else if (SelectedSubTool is BucketFillSubToolViewModel fill) {
                     TexturePalette?.SyncSelection(fill.SelectedTerrainType);
                 }
+
+                if (texturePanel != null) texturePanel.IsVisible = true;
+                if (browserPanel != null && texturePanel != null && browserPanel.Location == texturePanel.Location) {
+                    // If they are in the same location, maybe hide the browser so texture palette is seen?
+                    // For now, let's just make sure TexturePalette is visible.
+                }
+
                 LeftPanelContent = TexturePalette;
                 LeftPanelTitle = "Terrain Textures";
             }
             else {
+                if (browserPanel != null) browserPanel.IsVisible = true;
+
                 LeftPanelContent = ObjectBrowser;
                 LeftPanelTitle = "Object Browser";
             }
@@ -611,6 +652,17 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                 if (SelectedSubTool != null && SelectedTool.AllSubTools.Contains(SelectedSubTool)) {
                     uiState.LastSubToolIndex = SelectedTool.AllSubTools.IndexOf(SelectedSubTool);
                 }
+
+                // Save docking layout
+                uiState.DockingLayout.Clear();
+                foreach (var panel in DockingManager.AllPanels.OfType<DockablePanelViewModel>()) {
+                    uiState.DockingLayout.Add(new DockingPanelState {
+                        Id = panel.Id,
+                        Location = panel.Location.ToString(),
+                        IsVisible = panel.IsVisible
+                    });
+                }
+
                 Settings.Save();
             }
 
