@@ -6,10 +6,16 @@
              xmlns:vp="using:WorldBuilder.Views.Components.Viewports"
              xmlns:docking="clr-namespace:WorldBuilder.Lib.Docking;assembly=WorldBuilder"
              xmlns:dockingViews="clr-namespace:WorldBuilder.Lib.Docking.Views;assembly=WorldBuilder"
+             xmlns:converters="clr-namespace:WorldBuilder.Lib.Converters;assembly=WorldBuilder"
              mc:Ignorable="d" d:DesignWidth="1200" d:DesignHeight="800"
              x:Class="WorldBuilder.Editors.Landscape.Views.LandscapeEditorView"
              x:DataType="vm:LandscapeEditorViewModel"
              DragDrop.AllowDrop="True">
+
+    <UserControl.Resources>
+        <converters:OrientationToColumnsConverter x:Key="OrientationToColumns" />
+        <converters:OrientationToRowsConverter x:Key="OrientationToRows" />
+    </UserControl.Resources>
 
     <Grid x:Name="RootGrid">
         <Grid.RowDefinitions>
@@ -55,7 +61,7 @@
                     BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
                     BorderThickness="0,0,1,0"
                     IsVisible="{Binding DockingManager.LeftPanels.Count}">
-                <ScrollViewer>
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
                     <ItemsControl ItemsSource="{Binding DockingManager.LeftPanels}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -81,24 +87,42 @@
         <!--  Main Viewport Area  -->
         <Grid Grid.Column="2" Background="Black">
             <!-- Center Panels -->
-            <ContentControl Content="{Binding DockingManager.CenterPanels}">
-                <ContentControl.ContentTemplate>
-                    <DataTemplate>
-                        <ItemsControl ItemsSource="{Binding}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <UniformGrid Rows="1" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="docking:DockablePanelViewModel">
-                                    <docking:DockablePanelView />
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </DataTemplate>
-                </ContentControl.ContentTemplate>
-            </ContentControl>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <!-- Toggle Orientation Button (Only visible if multiple panels) -->
+                <Button Grid.Row="0"
+                        HorizontalAlignment="Right"
+                        Margin="4"
+                        ZIndex="10"
+                        Command="{Binding DockingManager.ToggleCenterOrientationCommand}"
+                        IsVisible="{Binding DockingManager.CenterPanels.Count, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <TextBlock Text="&#x21BA;" ToolTip.Tip="Rotate Layout" />
+                </Button>
+
+                <ContentControl Grid.Row="1" Content="{Binding DockingManager.CenterPanels}">
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate>
+                            <ItemsControl ItemsSource="{Binding}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid
+                                            Columns="{Binding $parent[UserControl].((vm:LandscapeEditorViewModel)DataContext).DockingManager.CenterOrientation, Converter={StaticResource OrientationToColumns}}"
+                                            Rows="{Binding $parent[UserControl].((vm:LandscapeEditorViewModel)DataContext).DockingManager.CenterOrientation, Converter={StaticResource OrientationToRows}}" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="docking:DockablePanelViewModel">
+                                        <docking:DockablePanelView />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+            </Grid>
 
             <!--  Overlay toggle toolbar  -->
             <Border
@@ -238,7 +262,7 @@
                     BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
                     BorderThickness="1,0,0,0"
                     IsVisible="{Binding DockingManager.RightPanels.Count}">
-                <ScrollViewer>
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
                     <ItemsControl ItemsSource="{Binding DockingManager.RightPanels}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>

@@ -557,7 +557,7 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                     textBox,
                     errorText,
                     new StackPanel {
-                        Orientation = Orientation.Horizontal,
+                        Orientation = Avalonia.Layout.Orientation.Horizontal,
                         HorizontalAlignment = HorizontalAlignment.Right,
                         Spacing = 10,
                         Children = {

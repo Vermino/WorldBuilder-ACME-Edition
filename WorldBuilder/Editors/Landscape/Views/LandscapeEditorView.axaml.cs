@@ -86,11 +86,16 @@ namespace WorldBuilder.Editors.Landscape.Views {
 
             HideGhosts();
 
-            // Thresholds
-            double leftThreshold = 200;
-            double rightThreshold = bounds.Width - 200;
-            double topThreshold = 100;
-            double bottomThreshold = bounds.Height - 100;
+            // Thresholds (25% of dimension, clamped to sensible min/max)
+            double w = bounds.Width;
+            double h = bounds.Height;
+            double xThresh = Math.Clamp(w * 0.25, 100, 400);
+            double yThresh = Math.Clamp(h * 0.25, 100, 300);
+
+            double leftThreshold = xThresh;
+            double rightThreshold = w - xThresh;
+            double topThreshold = yThresh;
+            double bottomThreshold = h - yThresh;
 
             if (pos.X < leftThreshold) {
                 if (_leftGhost != null) _leftGhost.IsVisible = true;
@@ -123,10 +128,15 @@ namespace WorldBuilder.Editors.Landscape.Views {
             var pos = e.GetPosition(this);
             var bounds = Bounds;
 
-            double leftThreshold = 200;
-            double rightThreshold = bounds.Width - 200;
-            double topThreshold = 100;
-            double bottomThreshold = bounds.Height - 100;
+            double w = bounds.Width;
+            double h = bounds.Height;
+            double xThresh = Math.Clamp(w * 0.25, 100, 400);
+            double yThresh = Math.Clamp(h * 0.25, 100, 300);
+
+            double leftThreshold = xThresh;
+            double rightThreshold = w - xThresh;
+            double topThreshold = yThresh;
+            double bottomThreshold = h - yThresh;
 
             DockLocation? newLocation = null;
 

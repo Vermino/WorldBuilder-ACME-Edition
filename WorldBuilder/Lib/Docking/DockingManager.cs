@@ -16,6 +16,9 @@ namespace WorldBuilder.Lib.Docking {
         public ObservableCollection<IDockable> CenterPanels { get; } = new();
         public ObservableCollection<IDockable> FloatingPanels { get; } = new();
 
+        [ObservableProperty]
+        private Orientation _centerOrientation = Orientation.Horizontal;
+
         public IEnumerable<IDockable> AllPanels => _allPanels;
 
         public void RegisterPanel(IDockable panel) {
@@ -77,6 +80,13 @@ namespace WorldBuilder.Lib.Docking {
         public void MovePanel(IDockable panel, DockLocation location) {
             panel.Location = location;
             UpdatePanelLocation(panel);
+        }
+
+        [RelayCommand]
+        public void ToggleCenterOrientation() {
+            CenterOrientation = CenterOrientation == Orientation.Horizontal
+                ? Orientation.Vertical
+                : Orientation.Horizontal;
         }
     }
 }
