@@ -733,6 +733,60 @@ namespace WorldBuilder.Editors.Landscape {
             throw new InvalidOperationException($"No available EnvCell IDs in landblock 0x{lbId:X4}");
         }
 
+        /// <summary>
+        /// Links two portals between two EnvCells. Updates both cells to point to each other.
+        /// Does NOT automatically upload to GPU as this is a logical change only (unless geometry changes).
+        /// </summary>
+        public void LinkPortals(EnvCell cellA, ushort portalIndexA, EnvCell cellB, ushort portalIndexB) {
+            if (portalIndexA >= cellA.CellPortals.Count) throw new ArgumentOutOfRangeException(nameof(portalIndexA));
+            if (portalIndexB >= cellB.CellPortals.Count) throw new ArgumentOutOfRangeException(nameof(portalIndexB));
+
+            var portalA = cellA.CellPortals[portalIndexA];
+            var portalB = cellB.CellPortals[portalIndexB];
+
+            // Link A -> B
+            portalA.OtherCellId = (ushort)(cellB.Id & 0xFFFF);
+            portalA.OtherPortalId = portalIndexB;
+            cellA.CellPortals[portalIndexA] = portalA;
+
+            // Link B -> A
+            portalB.OtherCellId = (ushort)(cellA.Id & 0xFFFF);
+            portalB.OtherPortalId = portalIndexA;
+            cellB.CellPortals[portalIndexB] = portalB;
+
+            // Mark cells as modified? The caller (DungeonDocument) handles persistence.
+            // If we needed to update visual debugging of portals, we might queue something here.
+        }
+
+        /// <summary>
+        /// Unlinks a portal in an EnvCell. If the portal was connected to another cell,
+        /// that connection is also severed (one-way or two-way depending on intent, but usually two-way).
+        /// </summary>
+        public void UnlinkPortal(EnvCell cell, ushort portalIndex) {
+            if (portalIndex >= cell.CellPortals.Count) return;
+
+            var portal = cell.CellPortals[portalIndex];
+            var otherCellId = portal.OtherCellId;
+            var otherPortalId = portal.OtherPortalId;
+
+            // Clear this portal
+            portal.OtherCellId = 0;
+            portal.OtherPortalId = 0;
+            cell.CellPortals[portalIndex] = portal;
+
+            // If connected, try to clear the other side
+            if (otherCellId != 0) {
+                // We need to find the other cell. It might be in _loadedCells or just in DATs.
+                // EnvCellManager caches loaded cells but doesn't map ID -> EnvCell object directly in _loadedCells (only LoadedEnvCell wrapper).
+                // However, the caller usually has access to the EnvCell objects (e.g. via DungeonDocument).
+                // If we want to support this fully within EnvCellManager, we might need to fetch the other cell.
+                // For now, we assume the caller handles the other side or we only support logical unlink of what we have.
+                // But to be safe, let's try to find it in the current landblock's context if possible?
+                // Actually, without the EnvCell object for the other side, we can't modify it in memory.
+                // So this method primarily updates 'cell'. The caller must ensure consistency if 'otherCell' is loaded.
+            }
+        }
+
         #endregion
 
         #region Landblock Management

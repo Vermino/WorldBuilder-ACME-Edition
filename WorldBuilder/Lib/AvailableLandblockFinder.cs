@@ -48,8 +48,8 @@ namespace WorldBuilder.Lib {
                         available = true;
                     }
                     else {
-                        // Check if it has any static objects or buildings
-                        if (lbi.Objects.Count == 0 && lbi.Buildings.Count == 0) {
+                        // Check if it has any static objects, buildings, or dungeon cells
+                        if (lbi.Objects.Count == 0 && lbi.Buildings.Count == 0 && lbi.NumCells == 0) {
                             available = true;
                         }
                     }
