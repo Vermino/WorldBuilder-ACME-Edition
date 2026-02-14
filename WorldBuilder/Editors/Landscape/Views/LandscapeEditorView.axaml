@@ -24,18 +24,20 @@
                 BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
                 BorderThickness="0,0,0,1"
                 IsVisible="{Binding DockingManager.TopPanels.Count}">
-            <ItemsControl ItemsSource="{Binding DockingManager.TopPanels}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <StackPanel Orientation="Horizontal" Spacing="5" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="docking:DockablePanelViewModel">
-                        <dockingViews:DockablePanelView />
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding DockingManager.TopPanels}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="5" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="docking:DockablePanelViewModel">
+                            <docking:DockablePanelView />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
         </Border>
 
         <Grid x:Name="MainGrid" Grid.Row="1">
@@ -62,7 +64,7 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="docking:DockablePanelViewModel">
-                                <dockingViews:DockablePanelView />
+                                <docking:DockablePanelView />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -78,7 +80,25 @@
 
         <!--  Main Viewport Area  -->
         <Grid Grid.Column="2" Background="Black">
-            <vp:ViewportContainer />
+            <!-- Center Panels -->
+            <ContentControl Content="{Binding DockingManager.CenterPanels}">
+                <ContentControl.ContentTemplate>
+                    <DataTemplate>
+                        <ItemsControl ItemsSource="{Binding}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <UniformGrid Rows="1" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="docking:DockablePanelViewModel">
+                                    <docking:DockablePanelView />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </DataTemplate>
+                </ContentControl.ContentTemplate>
+            </ContentControl>
 
             <!--  Overlay toggle toolbar  -->
             <Border
@@ -227,7 +247,7 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="docking:DockablePanelViewModel">
-                                <dockingViews:DockablePanelView />
+                                <docking:DockablePanelView />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -241,18 +261,20 @@
                 BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
                 BorderThickness="0,1,0,0"
                 IsVisible="{Binding DockingManager.BottomPanels.Count}">
-            <ItemsControl ItemsSource="{Binding DockingManager.BottomPanels}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <StackPanel Orientation="Horizontal" Spacing="5" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="docking:DockablePanelViewModel">
-                        <dockingViews:DockablePanelView />
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding DockingManager.BottomPanels}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="5" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="docking:DockablePanelViewModel">
+                            <docking:DockablePanelView />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
         </Border>
 
         <!-- Drop Ghosts -->

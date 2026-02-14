@@ -4,6 +4,7 @@ namespace WorldBuilder.Lib.Docking {
         Right,
         Top,
         Bottom,
+        Center,
         Floating
     }
 }

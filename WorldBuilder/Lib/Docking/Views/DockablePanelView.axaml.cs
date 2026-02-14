@@ -3,7 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Markup.Xaml;
 
-namespace WorldBuilder.Lib.Docking.Views {
+namespace WorldBuilder.Lib.Docking {
     public partial class DockablePanelView : UserControl {
         public DockablePanelView() {
             InitializeComponent();

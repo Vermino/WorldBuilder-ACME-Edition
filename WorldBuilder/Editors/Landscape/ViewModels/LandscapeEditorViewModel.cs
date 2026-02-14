@@ -176,6 +176,13 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             if (HistorySnapshotPanel != null) Register("History", "History", HistorySnapshotPanel, DockLocation.Right);
 
             Register("Toolbox", "Tools", new ToolboxViewModel(this), DockLocation.Right);
+
+            // Register Viewports
+            foreach (var vp in Viewports) {
+                // Use a sanitized ID
+                var id = "Viewport_" + vp.Title.Replace(" ", "");
+                Register(id, vp.Title, vp, DockLocation.Center);
+            }
         }
 
         private void RenderViewport(ViewportViewModel viewport, double deltaTime, Avalonia.PixelSize canvasSize, AvaloniaInputState inputState) {
