@@ -25,16 +25,13 @@
             <MenuItem Header="File">
                 <MenuItem Command="{Binding OpenExportDatsWindowCommand}" Header="Export Dats" />
                 <Separator />
-                <MenuItem Command="{Binding ExitCommand}" Header="Exit" InputGesture="{Binding ExitGesture}" />
-            </MenuItem>
-            <MenuItem Header="Edit">
-                <MenuItem Command="{Binding OpenKeyboardShortcutsCommand}" Header="Keyboard Shortcuts" />
+                <MenuItem Command="{Binding ExitCommand}" Header="Exit" InputGesture="Alt+F4" />
             </MenuItem>
             <MenuItem Header="Navigate">
                 <MenuItem
                     Command="{Binding GotoLandblockCommand}"
                     Header="Go to Landblock"
-                    InputGesture="{Binding GotoLandblockGesture}" />
+                    InputGesture="Ctrl+G" />
             </MenuItem>
             <MenuItem Command="{Binding OpenSettingsWindowCommand}" Header="Settings" />
         </Menu>

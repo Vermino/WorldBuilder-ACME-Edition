@@ -12,7 +12,6 @@ using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
 using WorldBuilder.Lib;
-using WorldBuilder.Lib.Input;
 using WorldBuilder.Shared.Documents;
 using WorldBuilder.Shared.Lib;
 using WorldBuilder.Shared.Models;
@@ -25,6 +24,7 @@ public partial class LandscapeEditorView : Base3DView {
     private GL? _gl;
     private IRenderer? _render;
     private bool _didInit;
+    private bool _isQPressedLastFrame;
     private LandscapeEditorViewModel? _viewModel;
     private ToolViewModelBase? _currentActiveTool => _viewModel?.SelectedTool;
     private Avalonia.Controls.Grid? _mainGrid;
@@ -112,15 +112,21 @@ public partial class LandscapeEditorView : Base3DView {
     private void HandleCameraSwitching() {
         if (_viewModel?.TerrainSystem == null) return;
 
-        if (_viewModel.InputManager.IsActionTriggered(InputActions.CameraToggleMode, InputState)) {
-            if (_viewModel.TerrainSystem.Scene.CameraManager.Current == _viewModel.TerrainSystem.Scene.PerspectiveCamera) {
-                _viewModel.TerrainSystem.Scene.CameraManager.SwitchCamera(_viewModel.TerrainSystem.Scene.TopDownCamera);
-                Console.WriteLine("Switched to top-down camera");
+        if (InputState.IsKeyDown(Key.Q)) {
+            if (!_isQPressedLastFrame) {
+                if (_viewModel.TerrainSystem.Scene.CameraManager.Current == _viewModel.TerrainSystem.Scene.PerspectiveCamera) {
+                    _viewModel.TerrainSystem.Scene.CameraManager.SwitchCamera(_viewModel.TerrainSystem.Scene.TopDownCamera);
+                    Console.WriteLine("Switched to top-down camera");
+                }
+                else {
+                    _viewModel.TerrainSystem.Scene.CameraManager.SwitchCamera(_viewModel.TerrainSystem.Scene.PerspectiveCamera);
+                    Console.WriteLine("Switched to perspective camera");
+                }
             }
-            else {
-                _viewModel.TerrainSystem.Scene.CameraManager.SwitchCamera(_viewModel.TerrainSystem.Scene.PerspectiveCamera);
-                Console.WriteLine("Switched to perspective camera");
-            }
+            _isQPressedLastFrame = true;
+        }
+        else {
+            _isQPressedLastFrame = false;
         }
     }
 
@@ -128,34 +134,34 @@ public partial class LandscapeEditorView : Base3DView {
         if (_viewModel?.TerrainSystem == null) return;
 
         var camera = _viewModel.TerrainSystem.Scene.CameraManager.Current;
+        bool shiftHeld = InputState.IsKeyDown(Key.LeftShift) || InputState.IsKeyDown(Key.RightShift);
 
-        // Camera Rotation (Perspective only)
-        if (camera is PerspectiveCamera perspCam) {
+        // Shift + Arrow keys = rotate camera (perspective only)
+        if (shiftHeld && camera is PerspectiveCamera perspCam) {
             float rotateSpeed = 60f * (float)deltaTime; // degrees per second
-            if (_viewModel.InputManager.IsActionActive(InputActions.CameraRotateLeft, InputState))
+            if (InputState.IsKeyDown(Key.Left))
                 perspCam.ProcessKeyboardRotation(rotateSpeed, 0);
-            if (_viewModel.InputManager.IsActionActive(InputActions.CameraRotateRight, InputState))
+            if (InputState.IsKeyDown(Key.Right))
                 perspCam.ProcessKeyboardRotation(-rotateSpeed, 0);
-            if (_viewModel.InputManager.IsActionActive(InputActions.CameraRotateUp, InputState))
+            if (InputState.IsKeyDown(Key.Up))
                 perspCam.ProcessKeyboardRotation(0, rotateSpeed);
-            if (_viewModel.InputManager.IsActionActive(InputActions.CameraRotateDown, InputState))
+            if (InputState.IsKeyDown(Key.Down))
                 perspCam.ProcessKeyboardRotation(0, -rotateSpeed);
         }
 
-        // Camera Movement
-        if (_viewModel.InputManager.IsActionActive(InputActions.CameraMoveForward, InputState))
+        // WASD always moves, Arrow keys move only when Shift is not held
+        if (InputState.IsKeyDown(Key.W) || (!shiftHeld && InputState.IsKeyDown(Key.Up)))
             camera.ProcessKeyboard(CameraMovement.Forward, deltaTime);
-        if (_viewModel.InputManager.IsActionActive(InputActions.CameraMoveBackward, InputState))
+        if (InputState.IsKeyDown(Key.S) || (!shiftHeld && InputState.IsKeyDown(Key.Down)))
             camera.ProcessKeyboard(CameraMovement.Backward, deltaTime);
-        if (_viewModel.InputManager.IsActionActive(InputActions.CameraMoveLeft, InputState))
+        if (InputState.IsKeyDown(Key.A) || (!shiftHeld && InputState.IsKeyDown(Key.Left)))
             camera.ProcessKeyboard(CameraMovement.Left, deltaTime);
-        if (_viewModel.InputManager.IsActionActive(InputActions.CameraMoveRight, InputState))
+        if (InputState.IsKeyDown(Key.D) || (!shiftHeld && InputState.IsKeyDown(Key.Right)))
             camera.ProcessKeyboard(CameraMovement.Right, deltaTime);
 
-        // Keyboard zoom
-        bool zoomIn = _viewModel.InputManager.IsActionActive(InputActions.CameraZoomIn, InputState);
-        bool zoomOut = _viewModel.InputManager.IsActionActive(InputActions.CameraZoomOut, InputState);
-
+        // Keyboard zoom (+/- keys)
+        bool zoomIn = InputState.IsKeyDown(Key.OemPlus) || InputState.IsKeyDown(Key.Add);
+        bool zoomOut = InputState.IsKeyDown(Key.OemMinus) || InputState.IsKeyDown(Key.Subtract);
         if (zoomIn || zoomOut) {
             float direction = zoomIn ? 1f : -1f;
             if (camera is OrthographicTopDownCamera ortho) {
@@ -180,24 +186,27 @@ public partial class LandscapeEditorView : Base3DView {
     protected override void OnGlKeyDown(KeyEventArgs e) {
         if (!_didInit || _viewModel?.TerrainSystem == null) return;
 
-        // Go to Landblock
-        if (_viewModel.InputManager.MatchesAction(InputActions.NavigationGoToLandblock, e.Key, e.KeyModifiers)) {
+        // Go to Landblock (Ctrl+G)
+        if (e.Key == Key.G && e.KeyModifiers.HasFlag(KeyModifiers.Control)) {
             _ = _viewModel.GotoLandblockCommand.ExecuteAsync(null);
         }
 
-        // Undo/Redo
-        if (_viewModel.InputManager.MatchesAction(InputActions.EditUndo, e.Key, e.KeyModifiers)) {
-            _viewModel.TerrainSystem.History.Undo();
+        if (e.Key == Key.Z && e.KeyModifiers.HasFlag(KeyModifiers.Control)) {
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) {
+                _viewModel.TerrainSystem.History.Redo();
+            }
+            else {
+                _viewModel.TerrainSystem.History.Undo();
+            }
         }
-        else if (_viewModel.InputManager.MatchesAction(InputActions.EditRedo, e.Key, e.KeyModifiers) ||
-                 _viewModel.InputManager.MatchesAction(InputActions.EditRedoAlternate, e.Key, e.KeyModifiers)) {
+        if (e.Key == Key.Y && e.KeyModifiers.HasFlag(KeyModifiers.Control)) {
             _viewModel.TerrainSystem.History.Redo();
         }
 
         // Object copy/paste/delete (supports multi-selection)
         var sel = _viewModel.TerrainSystem.EditingContext.ObjectSelection;
 
-        if (_viewModel.InputManager.MatchesAction(InputActions.EditCopy, e.Key, e.KeyModifiers)) {
+        if (e.Key == Key.C && e.KeyModifiers.HasFlag(KeyModifiers.Control)) {
             if (sel.HasSelection) {
                 if (sel.IsMultiSelection) {
                     sel.ClipboardMulti = sel.SelectedEntries
@@ -215,7 +224,7 @@ public partial class LandscapeEditorView : Base3DView {
             }
         }
 
-        if (_viewModel.InputManager.MatchesAction(InputActions.EditPaste, e.Key, e.KeyModifiers)) {
+        if (e.Key == Key.V && e.KeyModifiers.HasFlag(KeyModifiers.Control)) {
             if (sel.ClipboardMulti != null && sel.ClipboardMulti.Count > 0) {
                 // Multi-paste: place group relative to their center
                 sel.IsPlacementMode = true;
@@ -243,13 +252,13 @@ public partial class LandscapeEditorView : Base3DView {
             }
         }
 
-        if (_viewModel.InputManager.MatchesAction(InputActions.EditDelete, e.Key, e.KeyModifiers)) {
+        if (e.Key == Key.Delete) {
             if (sel.HasSelection) {
                 _ = DeleteSelectedObjectsAsync();
             }
         }
 
-        if (_viewModel.InputManager.MatchesAction(InputActions.EditCancel, e.Key, e.KeyModifiers)) {
+        if (e.Key == Key.Escape) {
             if (sel.IsPlacementMode) {
                 sel.IsPlacementMode = false;
                 sel.PlacementPreview = null;
@@ -371,7 +380,7 @@ public partial class LandscapeEditorView : Base3DView {
 
         // Copy (available for any selection, including scenery)
         if (sel.HasSelection) {
-            var copyItem = new MenuItem { Header = "Copy", InputGesture = _viewModel.InputManager.GetKeyGesture(InputActions.EditCopy) };
+            var copyItem = new MenuItem { Header = "Copy", InputGesture = new Avalonia.Input.KeyGesture(Key.C, KeyModifiers.Control) };
             copyItem.Click += (_, _) => {
                 if (sel.IsMultiSelection) {
                     sel.ClipboardMulti = sel.SelectedEntries
@@ -407,7 +416,7 @@ public partial class LandscapeEditorView : Base3DView {
             if (menu.Items.Count > 0)
                 menu.Items.Add(new Separator());
 
-            var pasteItem = new MenuItem { Header = "Paste", InputGesture = _viewModel.InputManager.GetKeyGesture(InputActions.EditPaste) };
+            var pasteItem = new MenuItem { Header = "Paste", InputGesture = new Avalonia.Input.KeyGesture(Key.V, KeyModifiers.Control) };
             pasteItem.Click += (_, _) => {
                 if (sel.ClipboardMulti != null && sel.ClipboardMulti.Count > 0) {
                     sel.IsPlacementMode = true;
@@ -434,7 +443,7 @@ public partial class LandscapeEditorView : Base3DView {
         if (hasEditableSelection) {
             menu.Items.Add(new Separator());
 
-            var deleteItem = new MenuItem { Header = "Delete", InputGesture = _viewModel.InputManager.GetKeyGesture(InputActions.EditDelete) };
+            var deleteItem = new MenuItem { Header = "Delete", InputGesture = new Avalonia.Input.KeyGesture(Key.Delete) };
             deleteItem.Click += (_, _) => {
                 _ = DeleteSelectedObjectsAsync();
             };
