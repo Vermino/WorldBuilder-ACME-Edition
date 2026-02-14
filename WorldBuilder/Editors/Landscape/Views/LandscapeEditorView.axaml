@@ -227,7 +227,7 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="docking:DockablePanelViewModel">
-                                <docking:DockablePanelView />
+                                <dockingViews:DockablePanelView />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

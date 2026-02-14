@@ -6,6 +6,7 @@
     xmlns:editors="clr-namespace:WorldBuilder.Editors.Landscape.Views"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="clr-namespace:WorldBuilder.ViewModels"
+    xmlns:docking="clr-namespace:WorldBuilder.Lib.Docking;assembly=WorldBuilder"
     d:DesignHeight="450"
     d:DesignWidth="800"
     x:CompileBindings="True"
