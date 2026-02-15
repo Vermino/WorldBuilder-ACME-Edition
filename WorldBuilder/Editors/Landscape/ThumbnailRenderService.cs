@@ -24,7 +24,6 @@ namespace WorldBuilder.Editors.Landscape {
         private uint _colorTexture;
         private uint _depthRenderbuffer;
         private bool _fboInitialized;
-        private int _currentFboSize = ThumbnailSize;
 
         // Request queue: (objectId, isSetup, frameCount)
         private readonly Queue<(uint Id, bool IsSetup, int FrameCount)> _queue = new();

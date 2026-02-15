@@ -178,9 +178,9 @@ namespace WorldBuilder.Views {
             shader.SetUniform("uSpecularPower", 32f);
 
             // Create rotation matrix for the object around Z axis (vertical spin)
-            // We rotate around the object center
+            // We rotate around the object center.
             var objectRotation = Matrix4x4.CreateTranslation(-center) *
-                               Matrix4x4.CreateRotationZ(_rotationAngle) *
+                           Matrix4x4.CreateRotationZ(_rotationAngle) *
                                Matrix4x4.CreateTranslation(center);
 
             // Render with rotation applied to the object
