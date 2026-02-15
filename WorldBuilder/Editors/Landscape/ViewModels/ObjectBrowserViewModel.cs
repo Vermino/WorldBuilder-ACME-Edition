@@ -298,25 +298,34 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         /// <summary>
         /// For each item without a thumbnail, try the disk cache first.
         /// If not cached, queue for rendering via the ThumbnailRenderService.
+        /// Runs on a background thread to avoid blocking the UI thread during disk I/O.
         /// </summary>
-        private void RequestThumbnails(ObservableCollection<ObjectBrowserItem> items) {
-            int cached = 0, queued = 0, skipped = 0;
-            foreach (var item in items) {
-                if (item.Thumbnail != null) { skipped++; continue; }
+        private void RequestThumbnails(IEnumerable<ObjectBrowserItem> items) {
+            var itemsList = items.ToList();
+            Task.Run(() => {
+                int cached = 0, queued = 0, skipped = 0;
+                foreach (var item in itemsList) {
+                    if (item.Thumbnail != null) { skipped++; continue; }
 
-                // Try disk cache first
-                var cachedBitmap = _thumbnailCache.TryLoadCached(item.Id);
-                if (cachedBitmap != null) {
-                    item.Thumbnail = cachedBitmap;
-                    cached++;
-                    continue;
+                    // Try disk cache first. We are already on a background thread, so
+                    // we use the synchronous method to avoid the overhead of task-per-item
+                    // while still keeping the UI thread responsive.
+                    var cachedBitmap = _thumbnailCache.TryLoadCached(item.Id);
+                    if (cachedBitmap != null) {
+                        Dispatcher.UIThread.Post(() => item.Thumbnail = cachedBitmap);
+                        cached++;
+                    }
+                    else {
+                        // Queue for rendering
+                        _thumbnailService?.RequestThumbnail(item.Id, item.IsSetup);
+                        queued++;
+                    }
                 }
 
-                // Queue for rendering
-                _thumbnailService?.RequestThumbnail(item.Id, item.IsSetup);
-                queued++;
-            }
-            Console.WriteLine($"[ObjectBrowser] RequestThumbnails: {items.Count} items, {cached} from cache, {queued} queued for render, {skipped} already have thumbnails");
+                if (cached > 0 || queued > 0) {
+                    Console.WriteLine($"[ObjectBrowser] RequestThumbnails: {itemsList.Count} items, {cached} from cache, {queued} queued for render, {skipped} already have thumbnails");
+                }
+            });
         }
 
         private void ApplyFilter() {
