@@ -30,6 +30,16 @@ namespace WorldBuilder.Editors.Landscape {
         private readonly HashSet<(uint Id, int FrameCount)> _queued = new(); // Avoid duplicate entries for same config
         private readonly HashSet<uint> _failedIds = new(); // Never retry objects that failed
 
+        // Current job state for time-sliced rendering
+        private class Job {
+            public uint Id;
+            public bool IsSetup;
+            public int TargetFrameCount;
+            public int CompletedFrames;
+            public byte[] Buffer = Array.Empty<byte>();
+        }
+        private Job? _currentJob;
+
         /// <summary>
         /// Fired on the GL thread when a thumbnail has been rendered.
         /// Parameters: objectId, RGBA pixel data (ThumbnailSize x ThumbnailSize), frameCount.
@@ -64,118 +74,119 @@ namespace WorldBuilder.Editors.Landscape {
         /// when the GL context is in a known-good state from the main scene's rendering.
         /// </summary>
         public unsafe void ProcessQueue() {
-            if (_queue.Count == 0) return;
+            if (_queue.Count == 0 && _currentJob == null) return;
 
             // Ensure FBO is initialized
             EnsureFBO();
 
             var sw = Stopwatch.StartNew();
-            int rendered = 0;
+            int framesRendered = 0;
 
             while (true) {
-                (uint id, bool isSetup, int frameCount) request = default;
-                lock (_queue) {
-                    if (_queue.Count == 0) break;
+                // If no active job, get next request
+                if (_currentJob == null) {
+                    (uint id, bool isSetup, int frameCount) request = default;
+                    bool found = false;
 
-                    // Priority handling: Scan queue for single-frame requests first
-                    // This ensures the grid populates quickly before processing expensive sprite sheets
-                    bool foundPriority = false;
-                    int count = _queue.Count;
-                    for (int i = 0; i < count; i++) {
-                        var item = _queue.Dequeue();
-                        if (!foundPriority && item.FrameCount == 1) {
-                            request = item;
-                            foundPriority = true;
-                        } else {
-                            _queue.Enqueue(item);
+                    lock (_queue) {
+                        if (_queue.Count > 0) {
+                            // Priority handling: Scan queue for single-frame requests first
+                            bool foundPriority = false;
+                            int count = _queue.Count;
+                            for (int i = 0; i < count; i++) {
+                                var item = _queue.Dequeue();
+                                if (!foundPriority && item.FrameCount == 1) {
+                                    request = item;
+                                    foundPriority = true;
+                                }
+                                else {
+                                    _queue.Enqueue(item);
+                                }
+                            }
+
+                            if (!foundPriority && _queue.Count > 0) {
+                                request = _queue.Dequeue();
+                            }
+
+                            // If we dequeued something (either priority or normal)
+                            if (foundPriority || (!foundPriority && count > 0)) { // Check count before dequeue was called above
+                                found = true;
+                            }
                         }
                     }
 
-                    if (foundPriority) {
-                        // 'request' is already set
-                    } else {
-                        // No priority items found, take the next one
-                        request = _queue.Dequeue();
+                    if (!found) break; // Queue empty
+
+                    // Initialize new job
+                    int width = ThumbnailSize * request.frameCount;
+                    int height = ThumbnailSize;
+                    _currentJob = new Job {
+                        Id = request.id,
+                        IsSetup = request.isSetup,
+                        TargetFrameCount = request.frameCount,
+                        CompletedFrames = 0,
+                        Buffer = new byte[width * height * 4]
+                    };
+                }
+
+                // Render as many frames for the current job as time allows
+                if (_currentJob != null) {
+                    try {
+                        bool finished = RenderJobStep(_currentJob, sw);
+                        framesRendered++;
+
+                        if (finished) {
+                            ThumbnailReady?.Invoke(_currentJob.Id, _currentJob.Buffer, _currentJob.TargetFrameCount);
+                            lock (_queue) {
+                                _queued.Remove((_currentJob.Id, _currentJob.TargetFrameCount));
+                            }
+                            _currentJob = null;
+                        }
+                    }
+                    catch (Exception ex) {
+                        Console.WriteLine($"[ThumbnailRender] Error rendering 0x{_currentJob.Id:X8}: {ex}");
+                        _failedIds.Add(_currentJob.Id);
+                        lock (_queue) {
+                            _queued.Remove((_currentJob.Id, _currentJob.TargetFrameCount));
+                        }
+                        _currentJob = null;
                     }
                 }
 
-                if (rendered > 0 && sw.ElapsedMilliseconds >= TimeBudgetMs) {
-                    // Re-enqueue for next frame
-                    lock (_queue) {
-                        // Put it back at the front if possible, or just re-add
-                        // Since we have a priority queue logic now, just re-enqueueing is fine
-                        _queue.Enqueue(request);
-                    }
+                // If budget exceeded, stop for this frame
+                if (sw.ElapsedMilliseconds >= TimeBudgetMs) {
                     break;
                 }
-
-                try {
-                    byte[]? pixels;
-                    if (request.frameCount > 1) {
-                        pixels = RenderThumbnailSpriteSheet(request.id, request.isSetup, request.frameCount);
-                    }
-                    else {
-                        pixels = RenderThumbnail(request.id, request.isSetup);
-                    }
-
-                    if (pixels != null) {
-                        ThumbnailReady?.Invoke(request.id, pixels, request.frameCount);
-                        rendered++;
-                    }
-                    else {
-                        _failedIds.Add(request.id);
-                    }
-                }
-                catch (Exception ex) {
-                    Console.WriteLine($"[ThumbnailRender] Error rendering 0x{request.id:X8}: {ex}");
-                    _failedIds.Add(request.id);
-                }
-
-                lock (_queue) {
-                    _queued.Remove((request.id, request.frameCount));
-                }
-            }
-
-            if (rendered > 0) {
-                Console.WriteLine($"[ThumbnailRender] Rendered {rendered} thumbnails in {sw.ElapsedMilliseconds}ms (remaining: {_queue.Count})");
             }
         }
 
-        private unsafe void EnsureFBO() {
-            if (_fboInitialized) return;
+        private unsafe bool RenderJobStep(Job job, Stopwatch sw) {
+            // Render one frame for the current job
+            int frameIndex = job.CompletedFrames;
 
-            _colorTexture = _gl.GenTexture();
-            _gl.BindTexture(TextureTarget.Texture2D, _colorTexture);
-            _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba8, ThumbnailSize, ThumbnailSize, 0, PixelFormat.Rgba, PixelType.UnsignedByte, null);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Linear);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
+            // Render specific frame
+            byte[]? tilePixels = RenderFrame(job.Id, job.IsSetup, frameIndex, job.TargetFrameCount);
 
-            _depthRenderbuffer = _gl.GenRenderbuffer();
-            _gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _depthRenderbuffer);
-            _gl.RenderbufferStorage(RenderbufferTarget.Renderbuffer, InternalFormat.Depth24Stencil8, ThumbnailSize, ThumbnailSize);
-
-            _fbo = _gl.GenFramebuffer();
-            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
-            _gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, _colorTexture, 0);
-            _gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthStencilAttachment, RenderbufferTarget.Renderbuffer, _depthRenderbuffer);
-
-            var status = _gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
-            if (status != GLEnum.FramebufferComplete) {
-                Console.WriteLine($"[ThumbnailRender] FBO incomplete: {status}");
+            if (tilePixels != null) {
+                // Copy to job buffer
+                if (job.TargetFrameCount > 1) {
+                    CopyTileToSheet(tilePixels, job.Buffer, frameIndex, job.TargetFrameCount);
+                }
+                else {
+                    // Direct copy for single frame
+                    Array.Copy(tilePixels, job.Buffer, tilePixels.Length);
+                }
             }
 
-            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
-            _fboInitialized = true;
+            job.CompletedFrames++;
+            return job.CompletedFrames >= job.TargetFrameCount;
         }
 
-        private unsafe byte[]? RenderThumbnailSpriteSheet(uint id, bool isSetup, int frameCount) {
-            // We render multiple frames tile-by-tile into a single large buffer
-            // 1 row, frameCount columns.
-            int sheetWidth = ThumbnailSize * frameCount;
-            int sheetHeight = ThumbnailSize;
-            byte[] spriteSheet = new byte[sheetWidth * sheetHeight * 4];
+        private unsafe byte[]? RenderFrame(uint id, bool isSetup, int frameIndex, int totalFrames) {
+            // This replaces RenderThumbnailSpriteSheet logic but for a single frame
+            // with specific rotation angle.
 
-            // Load render data using the MAIN scene's object manager
+            // Load render data
             var renderData = _objectManager.GetRenderData(id, isSetup);
             if (renderData == null) return null;
 
@@ -203,11 +214,11 @@ namespace WorldBuilder.Editors.Landscape {
                 _gl.GetInteger(GLEnum.Viewport, vp);
             }
 
-            // Bind our FBO (reused for each tile)
+            // Bind FBO
             _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
             _gl.Viewport(0, 0, ThumbnailSize, ThumbnailSize);
 
-            // Set up render state ONCE
+            // Set up render state
             _gl.Disable(EnableCap.StencilTest);
             _gl.Disable(EnableCap.ScissorTest);
             _gl.Enable(EnableCap.DepthTest);
@@ -242,49 +253,56 @@ namespace WorldBuilder.Editors.Landscape {
             _objectManager._objectShader.SetUniform("uAmbientIntensity", AmbientIntensity);
             _objectManager._objectShader.SetUniform("uSpecularPower", SpecularPower);
 
-            // Render each angle
+            // Clear FBO
+            _gl.ClearColor(0.18f, 0.18f, 0.22f, 1.0f);
+            _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+
+            // Calculate rotation
+            float angle = 0f;
+            if (totalFrames > 1) {
+                angle = (frameIndex / (float)totalFrames) * MathF.PI * 2f;
+            }
+
+            var rotationMatrix = Matrix4x4.CreateRotationZ(angle);
+            var objectRotation = Matrix4x4.CreateTranslation(-center) *
+                               rotationMatrix *
+                               Matrix4x4.CreateTranslation(center);
+
+            // Render object(s)
+            if (isSetup && renderData.IsSetup) {
+                foreach (var (partId, partTransform) in renderData.SetupParts) {
+                    var partRenderData = _objectManager.GetRenderData(partId, false);
+                    if (partRenderData == null) continue;
+                    var rotatedTransform = partTransform * objectRotation;
+                    RenderSingleObject(partRenderData, rotatedTransform);
+                }
+            }
+            else {
+                RenderSingleObject(renderData, objectRotation);
+            }
+
+            // Read pixels
             byte[] tilePixels = new byte[ThumbnailSize * ThumbnailSize * 4];
+            fixed (byte* ptr = tilePixels) {
+                _gl.ReadPixels(0, 0, ThumbnailSize, ThumbnailSize, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+            }
 
-            for (int i = 0; i < frameCount; i++) {
-                // Clear FBO
-                _gl.ClearColor(0.18f, 0.18f, 0.22f, 1.0f); // Opaque background matching UI to prevent alpha bleeding issues
-                _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+            // If single frame (static thumbnail), we need to FlipVertically now because we won't call CopyTileToSheet
+            // Actually, CopyTileToSheet handles the flip internally for sprite sheets.
+            // For single frames, we want the final output to be correct (top-down).
+            // RenderThumbnail (old method) did FlipVertically.
+            // We should just return raw GL pixels (bottom-up) here and handle flipping at destination.
 
-                float angle = (i / (float)frameCount) * MathF.PI * 2f;
-
-                // Simple Z-axis rotation (vertical spin) matching AssetPreviewWidget
-                var rotationMatrix = Matrix4x4.CreateRotationZ(angle);
-
-                // Transform to object center
-                var objectRotation = Matrix4x4.CreateTranslation(-center) *
-                                   rotationMatrix *
-                                   Matrix4x4.CreateTranslation(center);
-
-                if (isSetup && renderData.IsSetup) {
-                    foreach (var (partId, partTransform) in renderData.SetupParts) {
-                        var partRenderData = _objectManager.GetRenderData(partId, false);
-                        if (partRenderData == null) continue;
-                        var rotatedTransform = partTransform * objectRotation;
-                        RenderSingleObject(partRenderData, rotatedTransform);
-                    }
-                }
-                else {
-                    RenderSingleObject(renderData, objectRotation);
-                }
-
-                // Read pixels for this tile
-                fixed (byte* ptr = tilePixels) {
-                    _gl.ReadPixels(0, 0, ThumbnailSize, ThumbnailSize, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
-                }
-
-                // Flip and copy to sprite sheet
-                CopyTileToSheet(tilePixels, spriteSheet, i, frameCount);
+            // Wait, CopyTileToSheet expects raw GL pixels (bottom-up).
+            // But if it's a single frame, we need to flip it for Bitmap consumption.
+            if (totalFrames == 1) {
+                FlipVertically(tilePixels, ThumbnailSize, ThumbnailSize);
             }
 
             _gl.BindVertexArray(0);
             _gl.UseProgram(0);
 
-            // Restore previous GL state
+            // Restore GL state
             _gl.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)prevFbo);
             fixed (int* vp = prevViewport) {
                 _gl.Viewport(vp[0], vp[1], (uint)vp[2], (uint)vp[3]);
@@ -298,124 +316,36 @@ namespace WorldBuilder.Editors.Landscape {
                 }
             }
 
-            return spriteSheet;
+            return tilePixels;
         }
 
-        private unsafe byte[]? RenderThumbnail(uint id, bool isSetup) {
-            // Load render data using the MAIN scene's object manager
-            var renderData = _objectManager.GetRenderData(id, isSetup);
-            if (renderData == null) return null;
+        private unsafe void EnsureFBO() {
+            if (_fboInitialized) return;
 
-            // Get bounds to compute camera framing
-            var bounds = _objectManager.GetBounds(id, isSetup);
-            if (bounds == null) {
-                _objectManager.ReleaseRenderData(id, isSetup);
-                return null;
-            }
+            _colorTexture = _gl.GenTexture();
+            _gl.BindTexture(TextureTarget.Texture2D, _colorTexture);
+            _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba8, ThumbnailSize, ThumbnailSize, 0, PixelFormat.Rgba, PixelType.UnsignedByte, null);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Linear);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
 
-            var (boundsMin, boundsMax) = bounds.Value;
-            var center = (boundsMin + boundsMax) * 0.5f;
-            var extents = boundsMax - boundsMin;
-            var radius = extents.Length() * 0.5f;
+            _depthRenderbuffer = _gl.GenRenderbuffer();
+            _gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _depthRenderbuffer);
+            _gl.RenderbufferStorage(RenderbufferTarget.Renderbuffer, InternalFormat.Depth24Stencil8, ThumbnailSize, ThumbnailSize);
 
-            if (radius < 0.001f) {
-                _objectManager.ReleaseRenderData(id, isSetup);
-                return null;
-            }
-
-            // Camera: orbit from top-front-right at ~30 degrees elevation
-            float distance = radius * 2.8f;
-            float elevation = MathF.PI / 6f; // 30 degrees
-            float azimuth = MathF.PI / 4f;   // 45 degrees
-            var cameraOffset = new Vector3(
-                MathF.Cos(elevation) * MathF.Sin(azimuth),
-                MathF.Cos(elevation) * MathF.Cos(azimuth),
-                MathF.Sin(elevation)
-            );
-            var cameraPos = center + cameraOffset * distance;
-
-            // View and projection matrices
-            var view = Matrix4x4.CreateLookAt(cameraPos, center, Vector3.UnitZ);
-            float fov = MathF.PI / 4f; // 45 degrees
-            float near = distance * 0.01f;
-            float far = distance * 10f;
-            var projection = Matrix4x4.CreatePerspectiveFieldOfView(fov, 1.0f, near, far);
-            var viewProjection = view * projection;
-
-            // Save current GL state
-            _gl.GetInteger(GLEnum.FramebufferBinding, out int prevFbo);
-            int[] prevViewport = new int[4];
-            fixed (int* vp = prevViewport) {
-                _gl.GetInteger(GLEnum.Viewport, vp);
-            }
-
-            // Bind our FBO
+            _fbo = _gl.GenFramebuffer();
             _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
-            _gl.Viewport(0, 0, ThumbnailSize, ThumbnailSize);
+            _gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, _colorTexture, 0);
+            _gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthStencilAttachment, RenderbufferTarget.Renderbuffer, _depthRenderbuffer);
 
-            // Clear
-            _gl.ClearColor(0.18f, 0.18f, 0.22f, 1.0f);
-            _gl.ClearDepth(1f);
-            _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-
-            // Set up render state
-            _gl.Disable(EnableCap.StencilTest);
-            _gl.Disable(EnableCap.ScissorTest);
-            _gl.Enable(EnableCap.DepthTest);
-            _gl.DepthFunc(DepthFunction.Less);
-            _gl.DepthMask(true);
-            _gl.Enable(EnableCap.Blend);
-            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-            _gl.Disable(EnableCap.CullFace);
-
-            // Bind the MAIN scene's shader and set uniforms
-            _objectManager._objectShader.Bind();
-            _objectManager._objectShader.SetUniform("uViewProjection", viewProjection);
-            _objectManager._objectShader.SetUniform("uCameraPosition", cameraPos);
-            _objectManager._objectShader.SetUniform("uLightDirection", LightDirection);
-            _objectManager._objectShader.SetUniform("uAmbientIntensity", AmbientIntensity);
-            _objectManager._objectShader.SetUniform("uSpecularPower", SpecularPower);
-
-            // Render the object
-            if (isSetup && renderData.IsSetup) {
-                foreach (var (partId, partTransform) in renderData.SetupParts) {
-                    var partRenderData = _objectManager.GetRenderData(partId, false);
-                    if (partRenderData == null) continue;
-                    RenderSingleObject(partRenderData, partTransform);
-                }
-            }
-            else {
-                RenderSingleObject(renderData, Matrix4x4.Identity);
+            var status = _gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+            if (status != GLEnum.FramebufferComplete) {
+                Console.WriteLine($"[ThumbnailRender] FBO incomplete: {status}");
             }
 
-            _gl.BindVertexArray(0);
-            _gl.UseProgram(0);
-
-            // Read pixels
-            var pixels = new byte[ThumbnailSize * ThumbnailSize * 4];
-            fixed (byte* ptr = pixels) {
-                _gl.ReadPixels(0, 0, ThumbnailSize, ThumbnailSize, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
-            }
-
-            // Flip vertically (OpenGL reads bottom-up)
-            FlipVertically(pixels, ThumbnailSize, ThumbnailSize);
-
-            // Restore previous GL state
-            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)prevFbo);
-            fixed (int* vp = prevViewport) {
-                _gl.Viewport(vp[0], vp[1], (uint)vp[2], (uint)vp[3]);
-            }
-
-            // Release render data to avoid GPU memory bloat for objects not in the scene
-            _objectManager.ReleaseRenderData(id, isSetup);
-            if (isSetup && renderData.IsSetup) {
-                foreach (var (partId, _) in renderData.SetupParts) {
-                    _objectManager.ReleaseRenderData(partId, false);
-                }
-            }
-
-            return pixels;
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+            _fboInitialized = true;
         }
+
 
         private unsafe void RenderSingleObject(StaticObjectRenderData renderData, Matrix4x4 transform) {
             if (renderData.Batches.Count == 0) return;
