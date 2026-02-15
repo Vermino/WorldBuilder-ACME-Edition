@@ -308,12 +308,14 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         private void RequestThumbnails(ObservableCollection<ObjectBrowserItem> items) {
             int cached = 0, queued = 0, skipped = 0;
             const int frameCount = 8; // Request 8 frames for sprite sheet
+            int width = ThumbnailRenderService.ThumbnailSize * frameCount;
+            int height = ThumbnailRenderService.ThumbnailSize;
 
             foreach (var item in items) {
                 if (item.Thumbnail != null) { skipped++; continue; }
 
-                // Try disk cache first
-                var cachedBitmap = _thumbnailCache.TryLoadCached(item.Id);
+                // Try disk cache first with dimensions for sprite sheet
+                var cachedBitmap = _thumbnailCache.TryLoadCached(item.Id, width, height);
                 if (cachedBitmap != null) {
                     item.Thumbnail = cachedBitmap;
                     cached++;
