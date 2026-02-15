@@ -5,6 +5,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:WorldBuilder.Editors.Landscape.ViewModels"
+    xmlns:views="using:WorldBuilder.Views"
     d:DesignHeight="500"
     d:DesignWidth="280"
     x:CompileBindings="True"
@@ -57,11 +58,15 @@
                                         Background="#FF2A2A2A"
                                         CornerRadius="2"
                                         IsVisible="{Binding Thumbnail, Converter={x:Static ObjectConverters.IsNull}}" />
-                                    <Image
+                                    <!-- Animated sprite sheet viewer -->
+                                    <views:AnimatedSpriteImage
                                         Width="80"
                                         Height="80"
+                                        FrameWidth="96"
+                                        FrameCount="8"
+                                        FramesPerSecond="12"
+                                        AnimateOnHover="True"
                                         Source="{Binding Thumbnail}"
-                                        Stretch="Uniform"
                                         IsVisible="{Binding Thumbnail, Converter={x:Static ObjectConverters.IsNotNull}}" />
                                 </Panel>
                                 <!-- Object ID label -->

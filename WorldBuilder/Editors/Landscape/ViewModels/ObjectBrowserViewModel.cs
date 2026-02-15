@@ -94,13 +94,19 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         /// Called on the GL thread when a thumbnail has been rendered.
         /// Saves to disk cache and dispatches bitmap update to the UI thread.
         /// </summary>
-        private void OnThumbnailReady(uint objectId, byte[] rgbaPixels) {
+        private void OnThumbnailReady(uint objectId, byte[] rgbaPixels, int frameCount) {
             // Save to disk cache (fire-and-forget background thread)
-            _thumbnailCache.SaveAsync(objectId, rgbaPixels, ThumbnailRenderService.ThumbnailSize, ThumbnailRenderService.ThumbnailSize);
+            // TODO: Update cache to support sprite sheets or just cache first frame for now?
+            // For now, we only cache single-frame thumbnails in the existing cache structure.
+            if (frameCount == 1) {
+                _thumbnailCache.SaveAsync(objectId, rgbaPixels, ThumbnailRenderService.ThumbnailSize, ThumbnailRenderService.ThumbnailSize);
+            }
 
             // Create bitmap from pixels
-            var bitmap = ThumbnailCache.CreateBitmapFromRgba(rgbaPixels,
-                ThumbnailRenderService.ThumbnailSize, ThumbnailRenderService.ThumbnailSize);
+            var width = ThumbnailRenderService.ThumbnailSize * frameCount;
+            var height = ThumbnailRenderService.ThumbnailSize;
+
+            var bitmap = ThumbnailCache.CreateBitmapFromRgba(rgbaPixels, width, height);
 
             // Dispatch to UI thread to update the item
             Dispatcher.UIThread.Post(() => {
@@ -301,6 +307,8 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         /// </summary>
         private void RequestThumbnails(ObservableCollection<ObjectBrowserItem> items) {
             int cached = 0, queued = 0, skipped = 0;
+            const int frameCount = 8; // Request 8 frames for sprite sheet
+
             foreach (var item in items) {
                 if (item.Thumbnail != null) { skipped++; continue; }
 
@@ -313,7 +321,7 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                 }
 
                 // Queue for rendering
-                _thumbnailService?.RequestThumbnail(item.Id, item.IsSetup);
+                _thumbnailService?.RequestThumbnail(item.Id, item.IsSetup, frameCount);
                 queued++;
             }
             Console.WriteLine($"[ObjectBrowser] RequestThumbnails: {items.Count} items, {cached} from cache, {queued} queued for render, {skipped} already have thumbnails");

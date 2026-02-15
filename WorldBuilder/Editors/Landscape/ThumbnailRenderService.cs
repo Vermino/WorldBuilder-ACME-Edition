@@ -24,17 +24,18 @@ namespace WorldBuilder.Editors.Landscape {
         private uint _colorTexture;
         private uint _depthRenderbuffer;
         private bool _fboInitialized;
+        private int _currentFboSize = ThumbnailSize;
 
-        // Request queue: (objectId, isSetup)
-        private readonly Queue<(uint Id, bool IsSetup)> _queue = new();
+        // Request queue: (objectId, isSetup, frameCount)
+        private readonly Queue<(uint Id, bool IsSetup, int FrameCount)> _queue = new();
         private readonly HashSet<uint> _queued = new(); // Avoid duplicate entries
         private readonly HashSet<uint> _failedIds = new(); // Never retry objects that failed
 
         /// <summary>
         /// Fired on the GL thread when a thumbnail has been rendered.
-        /// Parameters: objectId, RGBA pixel data (ThumbnailSize x ThumbnailSize).
+        /// Parameters: objectId, RGBA pixel data (ThumbnailSize x ThumbnailSize), frameCount.
         /// </summary>
-        public event Action<uint, byte[]>? ThumbnailReady;
+        public event Action<uint, byte[], int>? ThumbnailReady;
 
         // Camera setup for thumbnail rendering
         private static readonly Vector3 LightDirection = Vector3.Normalize(new Vector3(0.5f, 0.3f, -0.3f));
@@ -49,11 +50,11 @@ namespace WorldBuilder.Editors.Landscape {
         /// <summary>
         /// Queue an object for thumbnail rendering. Thread-safe.
         /// </summary>
-        public void RequestThumbnail(uint id, bool isSetup) {
+        public void RequestThumbnail(uint id, bool isSetup, int frameCount = 1) {
             if (_failedIds.Contains(id)) return;
             lock (_queue) {
                 if (_queued.Add(id)) {
-                    _queue.Enqueue((id, isSetup));
+                    _queue.Enqueue((id, isSetup, frameCount));
                 }
             }
         }
@@ -66,13 +67,16 @@ namespace WorldBuilder.Editors.Landscape {
         public unsafe void ProcessQueue() {
             if (_queue.Count == 0) return;
 
+            // Ensure FBO is initialized. For now, we use a single size suitable for single frames.
+            // When we render sprite sheets, we'll resize or reallocate if needed, or render tile by tile.
+            // Given the requirement, rendering tile-by-tile into a larger CPU buffer is safer for FBO size limits.
             EnsureFBO();
 
             var sw = Stopwatch.StartNew();
             int rendered = 0;
 
             while (true) {
-                (uint id, bool isSetup) request;
+                (uint id, bool isSetup, int frameCount) request;
                 lock (_queue) {
                     if (_queue.Count == 0) break;
                     request = _queue.Dequeue();
@@ -81,7 +85,7 @@ namespace WorldBuilder.Editors.Landscape {
                 if (rendered > 0 && sw.ElapsedMilliseconds >= TimeBudgetMs) {
                     // Re-enqueue for next frame
                     lock (_queue) {
-                        var temp = new Queue<(uint, bool)>();
+                        var temp = new Queue<(uint, bool, int)>();
                         temp.Enqueue(request);
                         while (_queue.Count > 0) temp.Enqueue(_queue.Dequeue());
                         _queue.Clear();
@@ -91,9 +95,16 @@ namespace WorldBuilder.Editors.Landscape {
                 }
 
                 try {
-                    var pixels = RenderThumbnail(request.id, request.isSetup);
+                    byte[]? pixels;
+                    if (request.frameCount > 1) {
+                        pixels = RenderThumbnailSpriteSheet(request.id, request.isSetup, request.frameCount);
+                    }
+                    else {
+                        pixels = RenderThumbnail(request.id, request.isSetup);
+                    }
+
                     if (pixels != null) {
-                        ThumbnailReady?.Invoke(request.id, pixels);
+                        ThumbnailReady?.Invoke(request.id, pixels, request.frameCount);
                         rendered++;
                     }
                     else {
@@ -140,6 +151,136 @@ namespace WorldBuilder.Editors.Landscape {
 
             _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
             _fboInitialized = true;
+        }
+
+        private unsafe byte[]? RenderThumbnailSpriteSheet(uint id, bool isSetup, int frameCount) {
+            // We render multiple frames tile-by-tile into a single large buffer
+            // 1 row, frameCount columns.
+            int sheetWidth = ThumbnailSize * frameCount;
+            int sheetHeight = ThumbnailSize;
+            byte[] spriteSheet = new byte[sheetWidth * sheetHeight * 4];
+
+            // Load render data using the MAIN scene's object manager
+            var renderData = _objectManager.GetRenderData(id, isSetup);
+            if (renderData == null) return null;
+
+            // Get bounds
+            var bounds = _objectManager.GetBounds(id, isSetup);
+            if (bounds == null) {
+                _objectManager.ReleaseRenderData(id, isSetup);
+                return null;
+            }
+
+            var (boundsMin, boundsMax) = bounds.Value;
+            var center = (boundsMin + boundsMax) * 0.5f;
+            var extents = boundsMax - boundsMin;
+            var radius = extents.Length() * 0.5f;
+
+            if (radius < 0.001f) {
+                _objectManager.ReleaseRenderData(id, isSetup);
+                return null;
+            }
+
+            // Save current GL state
+            _gl.GetInteger(GLEnum.FramebufferBinding, out int prevFbo);
+            int[] prevViewport = new int[4];
+            fixed (int* vp = prevViewport) {
+                _gl.GetInteger(GLEnum.Viewport, vp);
+            }
+
+            // Bind our FBO (reused for each tile)
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
+            _gl.Viewport(0, 0, ThumbnailSize, ThumbnailSize);
+
+            // Set up render state ONCE
+            _gl.Disable(EnableCap.StencilTest);
+            _gl.Disable(EnableCap.ScissorTest);
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthFunc(DepthFunction.Less);
+            _gl.DepthMask(true);
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            _gl.Disable(EnableCap.CullFace);
+
+            // Camera setup
+            float distance = radius * 2.8f;
+            float elevation = MathF.PI / 6f; // 30 degrees
+            float azimuth = MathF.PI / 4f;   // 45 degrees
+            var cameraOffset = new Vector3(
+                MathF.Cos(elevation) * MathF.Sin(azimuth),
+                MathF.Cos(elevation) * MathF.Cos(azimuth),
+                MathF.Sin(elevation)
+            );
+            var cameraPos = center + cameraOffset * distance;
+
+            var view = Matrix4x4.CreateLookAt(cameraPos, center, Vector3.UnitZ);
+            float fov = MathF.PI / 4f;
+            float near = distance * 0.01f;
+            float far = distance * 10f;
+            var projection = Matrix4x4.CreatePerspectiveFieldOfView(fov, 1.0f, near, far);
+            var viewProjection = view * projection;
+
+            _objectManager._objectShader.Bind();
+            _objectManager._objectShader.SetUniform("uViewProjection", viewProjection);
+            _objectManager._objectShader.SetUniform("uCameraPosition", cameraPos);
+            _objectManager._objectShader.SetUniform("uLightDirection", LightDirection);
+            _objectManager._objectShader.SetUniform("uAmbientIntensity", AmbientIntensity);
+            _objectManager._objectShader.SetUniform("uSpecularPower", SpecularPower);
+
+            // Render each angle
+            byte[] tilePixels = new byte[ThumbnailSize * ThumbnailSize * 4];
+
+            for (int i = 0; i < frameCount; i++) {
+                // Clear FBO
+                _gl.ClearColor(0.18f, 0.18f, 0.22f, 0.0f); // Transparent background for sprites? Or match UI bg?
+                                                            // Using render service logic: 0.18, 0.18, 0.22 is the background
+                _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+
+                float angle = (i / (float)frameCount) * MathF.PI * 2f;
+                // Rotate object around its center
+                var objectRotation = Matrix4x4.CreateTranslation(-center) *
+                                   Matrix4x4.CreateRotationZ(angle) *
+                                   Matrix4x4.CreateTranslation(center);
+
+                if (isSetup && renderData.IsSetup) {
+                    foreach (var (partId, partTransform) in renderData.SetupParts) {
+                        var partRenderData = _objectManager.GetRenderData(partId, false);
+                        if (partRenderData == null) continue;
+                        var rotatedTransform = partTransform * objectRotation;
+                        RenderSingleObject(partRenderData, rotatedTransform);
+                    }
+                }
+                else {
+                    RenderSingleObject(renderData, objectRotation);
+                }
+
+                // Read pixels for this tile
+                fixed (byte* ptr = tilePixels) {
+                    _gl.ReadPixels(0, 0, ThumbnailSize, ThumbnailSize, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+                }
+
+                // Flip and copy to sprite sheet
+                CopyTileToSheet(tilePixels, spriteSheet, i, frameCount);
+            }
+
+            _gl.BindVertexArray(0);
+            _gl.UseProgram(0);
+
+            // Restore previous GL state
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)prevFbo);
+            fixed (int* vp = prevViewport) {
+                _gl.Viewport(vp[0], vp[1], (uint)vp[2], (uint)vp[3]);
+            }
+
+            // Release render data
+            _objectManager.ReleaseRenderData(id, isSetup);
+            if (isSetup && renderData.IsSetup) {
+                foreach (var (partId, _) in renderData.SetupParts) {
+                    _objectManager.ReleaseRenderData(partId, false);
+                }
+            }
+
+            return spriteSheet;
         }
 
         private unsafe byte[]? RenderThumbnail(uint id, bool isSetup) {
@@ -305,6 +446,34 @@ namespace WorldBuilder.Editors.Landscape {
                 System.Buffer.BlockCopy(pixels, topOffset, temp, 0, rowBytes);
                 System.Buffer.BlockCopy(pixels, bottomOffset, pixels, topOffset, rowBytes);
                 System.Buffer.BlockCopy(temp, 0, pixels, bottomOffset, rowBytes);
+            }
+        }
+
+        private static void CopyTileToSheet(byte[] tilePixels, byte[] sheetPixels, int frameIndex, int totalFrames) {
+            // Tile size: ThumbnailSize x ThumbnailSize
+            // Sheet size: (ThumbnailSize * totalFrames) x ThumbnailSize
+            // We need to copy row by row from tilePixels (which is flipped relative to GL, so 0 is top)
+            // But wait, FlipVertically was done on the *tile* in RenderThumbnail, but here we read raw GL pixels.
+            // So tilePixels is upside down (bottom-up).
+            // We need to flip it AND place it in the sheet.
+
+            int bpp = 4;
+            int rowBytes = ThumbnailSize * bpp;
+            int sheetWidth = ThumbnailSize * totalFrames;
+            int sheetRowBytes = sheetWidth * bpp;
+
+            for (int y = 0; y < ThumbnailSize; y++) {
+                // Source: bottom-up (GL) -> y=0 is bottom
+                // Dest: top-down (Bitmap) -> y=0 is top
+                // So srcRow is (ThumbnailSize - 1 - y)
+                int srcRow = ThumbnailSize - 1 - y;
+                int srcOffset = srcRow * rowBytes;
+
+                int destRow = y;
+                int destColOffset = frameIndex * rowBytes;
+                int destOffset = destRow * sheetRowBytes + destColOffset;
+
+                Array.Copy(tilePixels, srcOffset, sheetPixels, destOffset, rowBytes);
             }
         }
 
