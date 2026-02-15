@@ -430,5 +430,10 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
 
             PlacementRequested?.Invoke(this, EventArgs.Empty);
         }
+
+        [RelayCommand]
+        private void ClosePreview() {
+            SelectedObject = null;
+        }
     }
 }
