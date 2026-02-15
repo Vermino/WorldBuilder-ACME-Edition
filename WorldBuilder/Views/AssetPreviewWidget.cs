@@ -33,6 +33,22 @@ namespace WorldBuilder.Views {
             set => SetValue(ObjectManagerProperty, value);
         }
 
+        public static readonly StyledProperty<uint> ObjectIdProperty =
+            AvaloniaProperty.Register<AssetPreviewWidget, uint>(nameof(ObjectId));
+
+        public uint ObjectId {
+            get => GetValue(ObjectIdProperty);
+            set => SetValue(ObjectIdProperty, value);
+        }
+
+        public static readonly StyledProperty<bool> IsSetupProperty =
+            AvaloniaProperty.Register<AssetPreviewWidget, bool>(nameof(IsSetup));
+
+        public bool IsSetup {
+            get => GetValue(IsSetupProperty);
+            set => SetValue(IsSetupProperty, value);
+        }
+
         public static readonly StyledProperty<bool> AutoRotateProperty =
             AvaloniaProperty.Register<AssetPreviewWidget, bool>(nameof(AutoRotate), defaultValue: true);
 
@@ -53,12 +69,19 @@ namespace WorldBuilder.Views {
             if (change.Property == AutoRotateProperty) {
                 _autoRotate = change.GetNewValue<bool>();
             }
+            else if (change.Property == ObjectIdProperty) {
+                _objectId = change.GetNewValue<uint>();
+                Dispatcher.UIThread.Post(InvalidateVisual, DispatcherPriority.Background);
+            }
+            else if (change.Property == IsSetupProperty) {
+                _isSetup = change.GetNewValue<bool>();
+                Dispatcher.UIThread.Post(InvalidateVisual, DispatcherPriority.Background);
+            }
         }
 
         public void SetObject(uint objectId, bool isSetup) {
-            _objectId = objectId;
-            _isSetup = isSetup;
-            Dispatcher.UIThread.Post(InvalidateVisual, DispatcherPriority.Background);
+            SetCurrentValue(ObjectIdProperty, objectId);
+            SetCurrentValue(IsSetupProperty, isSetup);
         }
 
         protected override void OnGlInit(GL gl, PixelSize canvasSize) {

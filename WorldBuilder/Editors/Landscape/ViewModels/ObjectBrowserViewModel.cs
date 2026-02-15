@@ -36,6 +36,7 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         private readonly Dictionary<uint, ObjectBrowserItem> _itemLookup = new();
 
         [ObservableProperty] private ObservableCollection<ObjectBrowserItem> _filteredItems = new();
+        [ObservableProperty] private ObjectBrowserItem? _selectedObject;
         [ObservableProperty] private string _searchText = "";
         [ObservableProperty] private string _status = "Search by name or hex ID";
 
@@ -406,6 +407,8 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
 
         [RelayCommand]
         private void SelectForPlacement(ObjectBrowserItem item) {
+            SelectedObject = item; // Update selection for preview
+
             _context.ObjectSelection.IsPlacementMode = true;
             _context.ObjectSelection.PlacementPreview = new StaticObject {
                 Id = item.Id,
