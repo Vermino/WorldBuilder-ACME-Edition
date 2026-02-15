@@ -232,14 +232,19 @@ namespace WorldBuilder.Editors.Landscape {
 
             for (int i = 0; i < frameCount; i++) {
                 // Clear FBO
-                _gl.ClearColor(0.18f, 0.18f, 0.22f, 0.0f); // Transparent background for sprites? Or match UI bg?
-                                                            // Using render service logic: 0.18, 0.18, 0.22 is the background
+                _gl.ClearColor(0.18f, 0.18f, 0.22f, 1.0f); // Opaque background matching UI to prevent alpha bleeding issues
                 _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
                 float angle = (i / (float)frameCount) * MathF.PI * 2f;
-                // Rotate object around its center
+
+                // Match rotation style: X-axis tilt (90 deg) then Y-axis spin (Z in our coord system)
+                // This gives an isometric-like view where we see top/side
+                var rotationMatrix = Matrix4x4.CreateRotationX(MathF.PI / 2f) *
+                                   Matrix4x4.CreateRotationY(angle);
+
+                // Transform to object center
                 var objectRotation = Matrix4x4.CreateTranslation(-center) *
-                                   Matrix4x4.CreateRotationZ(angle) *
+                                   rotationMatrix *
                                    Matrix4x4.CreateTranslation(center);
 
                 if (isSetup && renderData.IsSetup) {

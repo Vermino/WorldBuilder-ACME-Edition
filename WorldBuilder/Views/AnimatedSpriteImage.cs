@@ -116,17 +116,25 @@ namespace WorldBuilder.Views {
             // Calculate source rect
             // Frames are arranged horizontally
             int frameW = FrameWidth;
-            if (FrameCount <= 1) {
-                // If only 1 frame or frame count not set correctly, use full image width
-                // But typically frameWidth is set to 96
-                // If source is 96x96, and frameWidth is 96, then srcX = 0
-                frameW = Math.Min(frameW, (int)source.Size.Width);
+            int frameCount = FrameCount;
+
+            // Safety check: if the source image is too small for the requested frames,
+            // fallback to displaying the whole image as a single frame.
+            // This handles legacy cached thumbnails (96x96) when UI expects sprite sheet (768x96).
+            if (source.Size.Width < frameW * frameCount) {
+                frameW = (int)source.Size.Width;
+                frameCount = 1;
+            }
+
+            if (frameCount <= 1) {
+                frameW = (int)source.Size.Width;
             }
 
             // Ensure frame index is valid
-            if (_currentFrame >= FrameCount) _currentFrame = 0;
+            int drawFrame = _currentFrame;
+            if (drawFrame >= frameCount) drawFrame = 0;
 
-            var srcRect = new Rect(_currentFrame * frameW, 0, frameW, source.Size.Height);
+            var srcRect = new Rect(drawFrame * frameW, 0, frameW, source.Size.Height);
             var destRect = new Rect(Bounds.Size);
 
             // Center and scale to fit (Uniform)
