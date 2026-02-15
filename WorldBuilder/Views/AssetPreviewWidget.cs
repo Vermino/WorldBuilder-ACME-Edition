@@ -162,9 +162,13 @@ namespace WorldBuilder.Views {
                 dist * 10f
             );
 
+            // Flip Y axis to correct for OpenGL/Window coordinate mismatch (Upside Down fix)
+            projection.M22 *= -1;
+
             // GL State
             gl.Enable(EnableCap.DepthTest);
             gl.Enable(EnableCap.CullFace);
+            gl.FrontFace(FrontFaceDirection.Cw); // Flip winding order because of negative Y scaling
             gl.ClearColor(0.1f, 0.1f, 0.12f, 1.0f); // Dark gray background instead of transparent
             gl.Clear(ClearBufferMask.DepthBufferBit | ClearBufferMask.ColorBufferBit);
 
