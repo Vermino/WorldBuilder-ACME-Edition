@@ -37,6 +37,11 @@ namespace WorldBuilder.Editors.Landscape {
             public int TargetFrameCount;
             public int CompletedFrames;
             public byte[] Buffer = Array.Empty<byte>();
+
+            // Granular state for intra-frame time slicing
+            public bool IsFrameStarted;
+            public StaticObjectRenderData? MainRenderData;
+            public int PartIndex;
         }
         private Job? _currentJob;
 
@@ -161,51 +166,17 @@ namespace WorldBuilder.Editors.Landscape {
         }
 
         private unsafe bool RenderJobStep(Job job, Stopwatch sw) {
-            // Render one frame for the current job
-            int frameIndex = job.CompletedFrames;
-
-            // Render specific frame
-            byte[]? tilePixels = RenderFrame(job.Id, job.IsSetup, frameIndex, job.TargetFrameCount);
-
-            if (tilePixels != null) {
-                // Copy to job buffer
-                if (job.TargetFrameCount > 1) {
-                    CopyTileToSheet(tilePixels, job.Buffer, frameIndex, job.TargetFrameCount);
-                }
-                else {
-                    // Direct copy for single frame
-                    Array.Copy(tilePixels, job.Buffer, tilePixels.Length);
+            // Initialize job-level data if needed (first run only)
+            if (job.MainRenderData == null) {
+                job.MainRenderData = _objectManager.GetRenderData(job.Id, job.IsSetup);
+                // Even if null, we mark initialization done. If null, we'll abort cleanly.
+                if (job.MainRenderData == null) {
+                    return true; // Job finished (failed)
                 }
             }
 
-            job.CompletedFrames++;
-            return job.CompletedFrames >= job.TargetFrameCount;
-        }
-
-        private unsafe byte[]? RenderFrame(uint id, bool isSetup, int frameIndex, int totalFrames) {
-            // This replaces RenderThumbnailSpriteSheet logic but for a single frame
-            // with specific rotation angle.
-
-            // Load render data
-            var renderData = _objectManager.GetRenderData(id, isSetup);
-            if (renderData == null) return null;
-
-            // Get bounds
-            var bounds = _objectManager.GetBounds(id, isSetup);
-            if (bounds == null) {
-                _objectManager.ReleaseRenderData(id, isSetup);
-                return null;
-            }
-
-            var (boundsMin, boundsMax) = bounds.Value;
-            var center = (boundsMin + boundsMax) * 0.5f;
-            var extents = boundsMax - boundsMin;
-            var radius = extents.Length() * 0.5f;
-
-            if (radius < 0.001f) {
-                _objectManager.ReleaseRenderData(id, isSetup);
-                return null;
-            }
+            // Safety check
+            if (job.MainRenderData == null) return true;
 
             // Save current GL state
             _gl.GetInteger(GLEnum.FramebufferBinding, out int prevFbo);
@@ -218,7 +189,7 @@ namespace WorldBuilder.Editors.Landscape {
             _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
             _gl.Viewport(0, 0, ThumbnailSize, ThumbnailSize);
 
-            // Set up render state
+            // Setup common GL state
             _gl.Disable(EnableCap.StencilTest);
             _gl.Disable(EnableCap.ScissorTest);
             _gl.Enable(EnableCap.DepthTest);
@@ -228,10 +199,26 @@ namespace WorldBuilder.Editors.Landscape {
             _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
             _gl.Disable(EnableCap.CullFace);
 
+            // Calculate bounds & camera (constant for the whole job, could be cached in Job too)
+            var bounds = _objectManager.GetBounds(job.Id, job.IsSetup);
+            if (!bounds.HasValue) {
+                ReleaseJobData(job);
+                return true;
+            }
+
+            var (boundsMin, boundsMax) = bounds.Value;
+            var center = (boundsMin + boundsMax) * 0.5f;
+            var radius = (boundsMax - boundsMin).Length() * 0.5f;
+
+            if (radius < 0.001f) {
+                ReleaseJobData(job);
+                return true;
+            }
+
             // Camera setup
             float distance = radius * 2.8f;
-            float elevation = MathF.PI / 6f; // 30 degrees
-            float azimuth = MathF.PI / 4f;   // 45 degrees
+            float elevation = MathF.PI / 6f;
+            float azimuth = MathF.PI / 4f;
             var cameraOffset = new Vector3(
                 MathF.Cos(elevation) * MathF.Sin(azimuth),
                 MathF.Cos(elevation) * MathF.Cos(azimuth),
@@ -240,10 +227,7 @@ namespace WorldBuilder.Editors.Landscape {
             var cameraPos = center + cameraOffset * distance;
 
             var view = Matrix4x4.CreateLookAt(cameraPos, center, Vector3.UnitZ);
-            float fov = MathF.PI / 4f;
-            float near = distance * 0.01f;
-            float far = distance * 10f;
-            var projection = Matrix4x4.CreatePerspectiveFieldOfView(fov, 1.0f, near, far);
+            var projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, 1.0f, distance * 0.01f, distance * 10f);
             var viewProjection = view * projection;
 
             _objectManager._objectShader.Bind();
@@ -253,70 +237,119 @@ namespace WorldBuilder.Editors.Landscape {
             _objectManager._objectShader.SetUniform("uAmbientIntensity", AmbientIntensity);
             _objectManager._objectShader.SetUniform("uSpecularPower", SpecularPower);
 
-            // Clear FBO
-            _gl.ClearColor(0.18f, 0.18f, 0.22f, 1.0f);
-            _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-
-            // Calculate rotation
-            float angle = 0f;
-            if (totalFrames > 1) {
-                angle = (frameIndex / (float)totalFrames) * MathF.PI * 2f;
+            // Start frame if needed
+            if (!job.IsFrameStarted) {
+                _gl.ClearColor(0.18f, 0.18f, 0.22f, 1.0f);
+                _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+                job.IsFrameStarted = true;
+                job.PartIndex = 0;
             }
 
+            // Calculate frame rotation
+            float angle = 0f;
+            if (job.TargetFrameCount > 1) {
+                angle = (job.CompletedFrames / (float)job.TargetFrameCount) * MathF.PI * 2f;
+            }
             var rotationMatrix = Matrix4x4.CreateRotationZ(angle);
             var objectRotation = Matrix4x4.CreateTranslation(-center) *
                                rotationMatrix *
                                Matrix4x4.CreateTranslation(center);
 
-            // Render object(s)
-            if (isSetup && renderData.IsSetup) {
-                foreach (var (partId, partTransform) in renderData.SetupParts) {
+            // Granular rendering loop
+            bool frameFinished = false;
+
+            if (job.IsSetup && job.MainRenderData.IsSetup) {
+                // Render parts incrementally
+                while (job.PartIndex < job.MainRenderData.SetupParts.Count) {
+                    var (partId, partTransform) = job.MainRenderData.SetupParts[job.PartIndex];
+
                     var partRenderData = _objectManager.GetRenderData(partId, false);
-                    if (partRenderData == null) continue;
-                    var rotatedTransform = partTransform * objectRotation;
-                    RenderSingleObject(partRenderData, rotatedTransform);
+                    if (partRenderData != null) {
+                        var rotatedTransform = partTransform * objectRotation;
+                        RenderSingleObject(partRenderData, rotatedTransform);
+
+                        // We do NOT release partRenderData here; we rely on LRU or let it persist briefly.
+                        // Actually, StaticObjectManager caches it, so we don't need to explicitly release it
+                        // unless we want to hint it's unused.
+                        // The original code called ReleaseRenderData immediately.
+                        // Let's call it to be safe and match original behavior to avoid memory bloat.
+                        _objectManager.ReleaseRenderData(partId, false);
+                    }
+
+                    job.PartIndex++;
+
+                    // Check budget
+                    if (sw.ElapsedMilliseconds >= TimeBudgetMs) {
+                        // Pause here, return false so ProcessQueue stops but doesn't discard job
+                        CleanupGLState(prevFbo, prevViewport);
+                        return false;
+                    }
                 }
+                frameFinished = true;
             }
             else {
-                RenderSingleObject(renderData, objectRotation);
+                // Render single object (assumed fast enough to be atomic)
+                RenderSingleObject(job.MainRenderData, objectRotation);
+                frameFinished = true;
             }
 
-            // Read pixels
-            byte[] tilePixels = new byte[ThumbnailSize * ThumbnailSize * 4];
-            fixed (byte* ptr = tilePixels) {
-                _gl.ReadPixels(0, 0, ThumbnailSize, ThumbnailSize, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+            if (frameFinished) {
+                // Read pixels
+                byte[] tilePixels = new byte[ThumbnailSize * ThumbnailSize * 4];
+                fixed (byte* ptr = tilePixels) {
+                    _gl.ReadPixels(0, 0, ThumbnailSize, ThumbnailSize, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+                }
+
+                if (job.TargetFrameCount > 1) {
+                    CopyTileToSheet(tilePixels, job.Buffer, job.CompletedFrames, job.TargetFrameCount);
+                }
+                else {
+                    FlipVertically(tilePixels, ThumbnailSize, ThumbnailSize);
+                    Array.Copy(tilePixels, job.Buffer, tilePixels.Length);
+                }
+
+                job.CompletedFrames++;
+                job.IsFrameStarted = false;
+                job.PartIndex = 0;
             }
 
-            // If single frame (static thumbnail), we need to FlipVertically now because we won't call CopyTileToSheet
-            // Actually, CopyTileToSheet handles the flip internally for sprite sheets.
-            // For single frames, we want the final output to be correct (top-down).
-            // RenderThumbnail (old method) did FlipVertically.
-            // We should just return raw GL pixels (bottom-up) here and handle flipping at destination.
+            CleanupGLState(prevFbo, prevViewport);
 
-            // Wait, CopyTileToSheet expects raw GL pixels (bottom-up).
-            // But if it's a single frame, we need to flip it for Bitmap consumption.
-            if (totalFrames == 1) {
-                FlipVertically(tilePixels, ThumbnailSize, ThumbnailSize);
+            if (job.CompletedFrames >= job.TargetFrameCount) {
+                ReleaseJobData(job);
+                return true; // Finished
             }
 
+            return false; // Not finished with job, but maybe finished with frame or time slice
+        }
+
+        private unsafe void CleanupGLState(int prevFbo, int[] prevViewport) {
             _gl.BindVertexArray(0);
             _gl.UseProgram(0);
-
-            // Restore GL state
             _gl.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)prevFbo);
             fixed (int* vp = prevViewport) {
                 _gl.Viewport(vp[0], vp[1], (uint)vp[2], (uint)vp[3]);
             }
+        }
 
-            // Release render data
-            _objectManager.ReleaseRenderData(id, isSetup);
-            if (isSetup && renderData.IsSetup) {
-                foreach (var (partId, _) in renderData.SetupParts) {
-                    _objectManager.ReleaseRenderData(partId, false);
-                }
+        private void ReleaseJobData(Job job) {
+            if (job.MainRenderData != null) {
+                _objectManager.ReleaseRenderData(job.Id, job.IsSetup);
+                // Also release parts if it was a setup?
+                // The GetRenderData logic increments ref count?
+                // Original code:
+                // _objectManager.ReleaseRenderData(id, isSetup);
+                // if (isSetup && renderData.IsSetup) { foreach ... ReleaseRenderData(partId) }
+                // Wait, GetRenderData(partId) was called INSIDE the loop.
+                // We released part data immediately in the loop above.
+                // We only need to release the MAIN render data here.
+
+                // Correction: The original code ALSO released parts at the end of RenderThumbnail.
+                // But that was because it fetched them inside the loop.
+                // Here we fetch parts inside the loop and release them there.
+                // So we only need to release the main render data.
+                job.MainRenderData = null;
             }
-
-            return tilePixels;
         }
 
         private unsafe void EnsureFBO() {
