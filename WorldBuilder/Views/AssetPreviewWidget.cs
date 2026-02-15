@@ -59,6 +59,13 @@ namespace WorldBuilder.Views {
 
         public AssetPreviewWidget() {
             var viewport = new Panel { Name = "Viewport", Background = Brushes.Transparent };
+
+            // Register name scope so Base3DView can find "Viewport"
+            if (NameScope.GetNameScope(this) == null) {
+                NameScope.SetNameScope(this, new NameScope());
+            }
+            NameScope.GetNameScope(this)?.Register("Viewport", viewport);
+
             Content = viewport;
             InitializeBase3DView();
             AutoRotate = true;
