@@ -76,17 +76,7 @@ namespace WorldBuilder.Editors.Landscape {
 
                 try {
                     // Synchronous render - simple and robust
-                    // Note: Large objects will block here.
-                    // We accept this trade-off for stability over complexity.
-                    byte[]? pixels = null;
-
-                    if (request.frameCount > 1) {
-                        // If we ever enable sprite sheets again, this handles it
-                        pixels = RenderThumbnailSpriteSheet(request.id, request.isSetup, request.frameCount);
-                    }
-                    else {
-                        pixels = RenderThumbnail(request.id, request.isSetup);
-                    }
+                    byte[]? pixels = RenderThumbnail(request.id, request.isSetup);
 
                     if (pixels != null) {
                         ThumbnailReady?.Invoke(request.id, pixels, request.frameCount);
@@ -107,62 +97,6 @@ namespace WorldBuilder.Editors.Landscape {
             }
         }
 
-        private unsafe byte[]? RenderThumbnailSpriteSheet(uint id, bool isSetup, int frameCount) {
-            int sheetWidth = ThumbnailSize * frameCount;
-            int sheetHeight = ThumbnailSize;
-            byte[] spriteSheet = new byte[sheetWidth * sheetHeight * 4];
-
-            // Only render if data is readily available or load it synchronously
-            var renderData = _objectManager.GetRenderData(id, isSetup);
-            if (renderData == null) return null;
-
-            var bounds = _objectManager.GetBounds(id, isSetup);
-            if (bounds == null) {
-                _objectManager.ReleaseRenderData(id, isSetup);
-                return null;
-            }
-
-            // Setup GL state
-            _gl.GetInteger(GLEnum.FramebufferBinding, out int prevFbo);
-            int[] prevViewport = new int[4];
-            fixed (int* vp = prevViewport) _gl.GetInteger(GLEnum.Viewport, vp);
-
-            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
-            _gl.Viewport(0, 0, ThumbnailSize, ThumbnailSize);
-
-            SetupCommonState();
-            SetupCamera(bounds.Value);
-
-            byte[] tilePixels = new byte[ThumbnailSize * ThumbnailSize * 4];
-
-            for (int i = 0; i < frameCount; i++) {
-                _gl.ClearColor(0.18f, 0.18f, 0.22f, 1.0f);
-                _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-
-                float angle = (i / (float)frameCount) * MathF.PI * 2f;
-                RenderObjectAtAngle(renderData, bounds.Value, angle);
-
-                fixed (byte* ptr = tilePixels) {
-                    _gl.ReadPixels(0, 0, ThumbnailSize, ThumbnailSize, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
-                }
-                CopyTileToSheet(tilePixels, spriteSheet, i, frameCount);
-            }
-
-            // Cleanup
-            _gl.BindVertexArray(0);
-            _gl.UseProgram(0);
-            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)prevFbo);
-            fixed (int* vp = prevViewport) _gl.Viewport(vp[0], vp[1], (uint)vp[2], (uint)vp[3]);
-
-            _objectManager.ReleaseRenderData(id, isSetup);
-            if (isSetup && renderData.IsSetup) {
-                foreach (var (partId, _) in renderData.SetupParts) {
-                    _objectManager.ReleaseRenderData(partId, false);
-                }
-            }
-
-            return spriteSheet;
-        }
 
         private unsafe byte[]? RenderThumbnail(uint id, bool isSetup) {
             var renderData = _objectManager.GetRenderData(id, isSetup);
@@ -323,14 +257,6 @@ namespace WorldBuilder.Editors.Landscape {
             }
         }
 
-        private static void CopyTileToSheet(byte[] tilePixels, byte[] sheetPixels, int frameIndex, int totalFrames) {
-            int rowBytes = ThumbnailSize * 4;
-            int sheetRowBytes = ThumbnailSize * totalFrames * 4;
-            for (int y = 0; y < ThumbnailSize; y++) {
-                int srcRow = ThumbnailSize - 1 - y;
-                Array.Copy(tilePixels, srcRow * rowBytes, sheetPixels, y * sheetRowBytes + frameIndex * rowBytes, rowBytes);
-            }
-        }
 
         public void Dispose() {
             if (_fboInitialized) {
