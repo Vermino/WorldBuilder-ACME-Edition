@@ -141,7 +141,7 @@ namespace WorldBuilder.Editors.Landscape.Commands {
 
                     var docId = $"landblock_{lbKey:X4}";
                     var doc = _context.TerrainSystem.DocumentManager
-                        .GetDocumentAsync<LandblockDocument>(docId).Result;
+                        .GetOrCreateDocumentAsync<LandblockDocument>(docId).Result;
                     if (doc != null) {
                         foreach(var idx in indices) {
                             doc.RemoveStaticObject(idx);
