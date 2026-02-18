@@ -24,6 +24,9 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         private BiomeDefinition? _selectedBiome;
 
         [ObservableProperty]
+        private ObservableCollection<BiomeObjectViewModel> _selectedBiomeObjects = new();
+
+        [ObservableProperty]
         private float _brushRadius = 20f;
 
         [ObservableProperty]
@@ -106,6 +109,26 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
 
         partial void OnSelectedBiomeChanged(BiomeDefinition? value) {
             UpdatePreviewTexture();
+            UpdateBiomeObjects();
+        }
+
+        private void UpdateBiomeObjects() {
+            SelectedBiomeObjects.Clear();
+            if (_selectedBiome != null) {
+                foreach (var obj in _selectedBiome.Objects) {
+                    SelectedBiomeObjects.Add(new BiomeObjectViewModel(
+                        obj,
+                        Context.TerrainSystem.Scene.ThumbnailService?.Cache,
+                        RemoveBiomeObject));
+                }
+            }
+        }
+
+        private void RemoveBiomeObject(BiomeObjectViewModel vm) {
+            if (_selectedBiome != null) {
+                _selectedBiome.Objects.Remove(vm.Model);
+                SelectedBiomeObjects.Remove(vm);
+            }
         }
 
         private void UpdatePreviewTexture() {
@@ -311,6 +334,8 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
 
                 _pendingObjects.Add((lbKey, obj));
                 _pendingObjectIndices.Add((lbKey, index));
+
+                // Explicitly invalidate cache and force a visual update
                 Context.TerrainSystem.Scene.InvalidateStaticObjectsCache();
             }
         }
@@ -359,13 +384,16 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             // Check if already exists
             if (_selectedBiome.Objects.Any(o => o.ObjectId == objectId)) return;
 
-            _selectedBiome.Objects.Add(new BiomeObject {
+            var newObj = new BiomeObject {
                 ObjectId = objectId,
                 Density = 0.1f // Default density
-            });
+            };
 
-            // Since BiomeDefinition.Objects is an ObservableCollection,
-            // the UI will update automatically.
+            _selectedBiome.Objects.Add(newObj);
+            SelectedBiomeObjects.Add(new BiomeObjectViewModel(
+                newObj,
+                Context.TerrainSystem.Scene.ThumbnailService?.Cache,
+                RemoveBiomeObject));
         }
     }
 }

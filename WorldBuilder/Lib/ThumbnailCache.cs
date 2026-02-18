@@ -14,10 +14,8 @@ namespace WorldBuilder.Lib {
     public class ThumbnailCache {
         private readonly string _cacheDir;
 
-        public ThumbnailCache() {
-            _cacheDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "WorldBuilder", "thumbnails");
+        public ThumbnailCache(string cacheDir) {
+            _cacheDir = cacheDir;
 
             try {
                 Directory.CreateDirectory(_cacheDir);
@@ -25,6 +23,11 @@ namespace WorldBuilder.Lib {
             catch (Exception ex) {
                 Console.WriteLine($"[ThumbnailCache] Failed to create cache directory: {ex.Message}");
             }
+        }
+
+        public ThumbnailCache() : this(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WorldBuilder", "thumbnails")) {
         }
 
         /// <summary>
@@ -44,6 +47,17 @@ namespace WorldBuilder.Lib {
                 try { File.Delete(path); } catch { }
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Try to load a cached thumbnail from disk asynchronously.
+        /// Returns null if no cached thumbnail exists for the given ID.
+        /// </summary>
+        public async Task<Bitmap?> GetThumbnailAsync(uint objectId, bool isSetup) {
+            // Note: isSetup is not currently used in filename, assuming unique IDs across types or handled by caller
+            // If ID collision is possible between Setup and GfxObj, we should include type in filename.
+            // For AC, ObjectIds are globally unique (or at least distinguishable by high byte).
+            return await Task.Run(() => TryLoadCached(objectId));
         }
 
         /// <summary>

@@ -71,12 +71,19 @@
                     DragDrop.AllowDrop="True"
                     DragDrop.Drop="OnDrop">
                 <ScrollViewer MaxHeight="400">
-                    <ItemsControl ItemsSource="{Binding SelectedBiome.Objects}">
+                    <ItemsControl ItemsSource="{Binding SelectedBiomeObjects}">
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="models:BiomeObject">
+                            <DataTemplate x:DataType="vm:BiomeObjectViewModel">
                                 <Expander HorizontalAlignment="Stretch" Margin="0,0,0,5">
                                     <Expander.Header>
-                                        <TextBlock Text="{Binding ObjectId, StringFormat='ID: 0x{0:X8}'}" FontWeight="SemiBold" />
+                                        <Grid ColumnDefinitions="Auto,*,Auto">
+                                            <Panel Width="32" Height="32" Margin="0,0,10,0">
+                                                <Border Background="#FF2A2A2A" CornerRadius="2" IsVisible="{Binding Thumbnail, Converter={x:Static ObjectConverters.IsNull}}" />
+                                                <Image Width="32" Height="32" Source="{Binding Thumbnail}" Stretch="Uniform" IsVisible="{Binding Thumbnail, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                            </Panel>
+                                            <TextBlock Grid.Column="1" Text="{Binding ObjectId, StringFormat='ID: 0x{0:X8}'}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                            <Button Grid.Column="2" Content="🗑" Command="{Binding DeleteCommand}" ToolTip.Tip="Remove Object" Padding="5,2" Margin="5,0,0,0"/>
+                                        </Grid>
                                     </Expander.Header>
                                     <StackPanel Spacing="5" Margin="5">
                                         <Grid ColumnDefinitions="60,*" RowDefinitions="Auto,Auto,Auto">
