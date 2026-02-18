@@ -8,6 +8,7 @@ using System;
 using System.Numerics;
 using WorldBuilder.Lib;
 using WorldBuilder.ViewModels;
+using WorldBuilder.Editors.Landscape;
 
 namespace WorldBuilder.Views.Components.Viewports {
     public partial class ViewportControl : Base3DView {
@@ -75,19 +76,46 @@ namespace WorldBuilder.Views.Components.Viewports {
         }
 
         protected override void OnGlPointerMoved(PointerEventArgs e, Vector2 mousePositionScaled) {
-             _viewModel?.PointerMovedAction?.Invoke(e, mousePositionScaled);
+             _viewModel?.PointerMovedAction?.Invoke(e, mousePositionScaled, InputState);
         }
 
         protected override void OnGlPointerWheelChanged(PointerWheelEventArgs e) {
-            _viewModel?.PointerWheelAction?.Invoke(e);
+            _viewModel?.PointerWheelAction?.Invoke(e, InputState);
         }
 
         protected override void OnGlPointerPressed(PointerPressedEventArgs e) {
-            _viewModel?.PointerPressedAction?.Invoke(e);
+            // Force update mouse state with pressed button flags before invoking command
+            UpdateMouseState(e.GetPosition(this), e.GetCurrentPoint(this).Properties);
+            _viewModel?.PointerPressedAction?.Invoke(e, InputState);
+            e.Pointer.Capture(this);
         }
 
         protected override void OnGlPointerReleased(PointerReleasedEventArgs e) {
-            _viewModel?.PointerReleasedAction?.Invoke(e);
+            UpdateMouseState(e.GetPosition(this), e.GetCurrentPoint(this).Properties);
+            _viewModel?.PointerReleasedAction?.Invoke(e, InputState);
+            e.Pointer.Capture(null);
+        }
+
+        protected override void UpdateMouseState(Point position, PointerPointProperties properties) {
+            if (_viewModel?.TerrainSystem == null || _viewModel.Camera == null) return;
+
+            var scale = InputScale;
+            if (scale == Vector2.Zero) scale = Vector2.One;
+
+            var width = (int)(Bounds.Width * scale.X);
+            var height = (int)(Bounds.Height * scale.Y);
+            if (width == 0) width = (int)Bounds.Width;
+            if (height == 0) height = (int)Bounds.Height;
+
+            InputState.UpdateMouseState(
+                position,
+                properties,
+                width,
+                height,
+                scale,
+                _viewModel.Camera,
+                _viewModel.TerrainSystem
+            );
         }
     }
 }

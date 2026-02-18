@@ -107,18 +107,21 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             var pCam = TerrainSystem.Scene.PerspectiveCamera;
             var orthoCam = TerrainSystem.Scene.TopDownCamera;
 
-            var pViewport = new ViewportViewModel(pCam) { Title = "Perspective", IsActive = true };
-            var orthoViewport = new ViewportViewModel(orthoCam) { Title = "Top Down", IsActive = false };
+            var pViewport = new ViewportViewModel(pCam) { Title = "Perspective", IsActive = true, TerrainSystem = TerrainSystem };
+            var orthoViewport = new ViewportViewModel(orthoCam) { Title = "Top Down", IsActive = false, TerrainSystem = TerrainSystem };
 
             // Wire up rendering and input
             pViewport.RenderAction = (dt, size, input) => RenderViewport(pViewport, dt, size, input);
             orthoViewport.RenderAction = (dt, size, input) => RenderViewport(orthoViewport, dt, size, input);
 
-            pViewport.PointerWheelAction = (e) => HandleViewportWheel(pViewport, e);
-            orthoViewport.PointerWheelAction = (e) => HandleViewportWheel(orthoViewport, e);
+            pViewport.PointerWheelAction = (e, inputState) => HandleViewportWheel(pViewport, e);
+            orthoViewport.PointerWheelAction = (e, inputState) => HandleViewportWheel(orthoViewport, e);
 
-            pViewport.PointerPressedAction = (e) => HandleViewportClick(pViewport, e);
-            orthoViewport.PointerPressedAction = (e) => HandleViewportClick(orthoViewport, e);
+            pViewport.PointerPressedAction = (e, inputState) => HandleViewportPressed(pViewport, e, inputState);
+            orthoViewport.PointerPressedAction = (e, inputState) => HandleViewportPressed(orthoViewport, e, inputState);
+
+            pViewport.PointerReleasedAction = (e, inputState) => HandleViewportReleased(pViewport, e, inputState);
+            orthoViewport.PointerReleasedAction = (e, inputState) => HandleViewportReleased(orthoViewport, e, inputState);
 
             Viewports.Add(pViewport);
             Viewports.Add(orthoViewport);
@@ -253,10 +256,15 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             SelectedTool?.RenderOverlay(viewport.Renderer, viewport.Camera, (float)canvasSize.Width / canvasSize.Height);
         }
 
-        private void HandleViewportClick(ViewportViewModel viewport, PointerPressedEventArgs e) {
+        private void HandleViewportPressed(ViewportViewModel viewport, PointerPressedEventArgs e, AvaloniaInputState inputState) {
             foreach (var v in Viewports) {
                 v.IsActive = v == viewport;
             }
+            SelectedTool?.HandleMouseDown(inputState.MouseState);
+        }
+
+        private void HandleViewportReleased(ViewportViewModel viewport, PointerReleasedEventArgs e, AvaloniaInputState inputState) {
+            SelectedTool?.HandleMouseUp(inputState.MouseState);
         }
 
         private void HandleViewportWheel(ViewportViewModel viewport, PointerWheelEventArgs e) {
@@ -281,8 +289,9 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             // Keyboard movement
             // Logic copied from View
             bool shiftHeld = inputState.IsKeyDown(Avalonia.Input.Key.LeftShift) || inputState.IsKeyDown(Avalonia.Input.Key.RightShift);
+            bool ctrlHeld = inputState.IsKeyDown(Avalonia.Input.Key.LeftCtrl) || inputState.IsKeyDown(Avalonia.Input.Key.RightCtrl);
 
-            if (shiftHeld && camera is PerspectiveCamera perspCam) {
+            if ((shiftHeld || ctrlHeld) && camera is PerspectiveCamera perspCam) {
                 float rotateSpeed = 60f * (float)deltaTime;
                 if (inputState.IsKeyDown(Avalonia.Input.Key.Left)) perspCam.ProcessKeyboardRotation(rotateSpeed, 0);
                 if (inputState.IsKeyDown(Avalonia.Input.Key.Right)) perspCam.ProcessKeyboardRotation(-rotateSpeed, 0);
@@ -290,13 +299,13 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                 if (inputState.IsKeyDown(Avalonia.Input.Key.Down)) perspCam.ProcessKeyboardRotation(0, -rotateSpeed);
             }
 
-            if (inputState.IsKeyDown(Avalonia.Input.Key.W) || (!shiftHeld && inputState.IsKeyDown(Avalonia.Input.Key.Up)))
+            if (inputState.IsKeyDown(Avalonia.Input.Key.W) || ((!shiftHeld && !ctrlHeld) && inputState.IsKeyDown(Avalonia.Input.Key.Up)))
                 camera.ProcessKeyboard(CameraMovement.Forward, deltaTime);
-            if (inputState.IsKeyDown(Avalonia.Input.Key.S) || (!shiftHeld && inputState.IsKeyDown(Avalonia.Input.Key.Down)))
+            if (inputState.IsKeyDown(Avalonia.Input.Key.S) || ((!shiftHeld && !ctrlHeld) && inputState.IsKeyDown(Avalonia.Input.Key.Down)))
                 camera.ProcessKeyboard(CameraMovement.Backward, deltaTime);
-            if (inputState.IsKeyDown(Avalonia.Input.Key.A) || (!shiftHeld && inputState.IsKeyDown(Avalonia.Input.Key.Left)))
+            if (inputState.IsKeyDown(Avalonia.Input.Key.A) || ((!shiftHeld && !ctrlHeld) && inputState.IsKeyDown(Avalonia.Input.Key.Left)))
                 camera.ProcessKeyboard(CameraMovement.Left, deltaTime);
-            if (inputState.IsKeyDown(Avalonia.Input.Key.D) || (!shiftHeld && inputState.IsKeyDown(Avalonia.Input.Key.Right)))
+            if (inputState.IsKeyDown(Avalonia.Input.Key.D) || ((!shiftHeld && !ctrlHeld) && inputState.IsKeyDown(Avalonia.Input.Key.Right)))
                 camera.ProcessKeyboard(CameraMovement.Right, deltaTime);
 
             // Vertical Movement (Space = Up, Shift = Down)
@@ -364,32 +373,8 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                     }
                 }
             }
-            else if (source == orthoCam) {
-                // Sync Perspective to Ortho (X, Y only, keep offset)
-                // We want pCam to look at orthoCam.Position.X, Y
-                // But we don't want to change pCam's rotation/height necessarily, just slide it.
-                // Or do we?
-                // If we slide pCam, we keep its relative offset to the ground?
-
-                // Current P pos
-                var currentP = pCam.Position;
-
-                // We want the new "LookAt" on ground to be Ortho.X, Ortho.Y
-                // But calculating new position requires knowing the offset.
-
-                // Simplest: Just move X/Y to match. This moves the camera body.
-                // If camera is looking straight down, this is perfect.
-                // If looking at angle, it shifts the view.
-
-                // Let's stick to simple position sync for Ortho->Persp to avoid disorientation
-                // But adjust for the fact we sync'd TO the focal point before.
-                // If we sync'd Ortho to Focal Point, then Ortho.Pos IS the Focal Point (in X,Y).
-                // So if we move Persp.Pos to Ortho.Pos, we are moving the camera ON TOP of the focal point.
-                // Which is fine for TopDown behavior, but if angled, might feel weird?
-                // Actually, standard behavior for "Go To" is centering camera.
-                // Let's keep the simple sync for Ortho->Persp for now as it's predictable.
-                pCam.SetPosition(new Vector3(orthoCam.Position.X, orthoCam.Position.Y, pCam.Position.Z));
-            }
+            // One-way sync: Perspective -> Ortho.
+            // Ortho interactions (panning top-down) do not affect Perspective camera to avoid "tight leash" behavior.
         }
 
         [RelayCommand]

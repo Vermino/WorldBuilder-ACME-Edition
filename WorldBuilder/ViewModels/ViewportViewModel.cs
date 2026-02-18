@@ -5,6 +5,7 @@ using System;
 using Avalonia;
 using Avalonia.Input;
 using System.Numerics;
+using WorldBuilder.Editors.Landscape;
 
 namespace WorldBuilder.ViewModels {
     public partial class ViewportViewModel : ViewModelBase {
@@ -16,6 +17,8 @@ namespace WorldBuilder.ViewModels {
 
         [ObservableProperty]
         private ICamera _camera;
+
+        public TerrainSystem? TerrainSystem { get; set; }
 
         private OpenGLRenderer? _renderer;
         public OpenGLRenderer? Renderer {
@@ -35,10 +38,10 @@ namespace WorldBuilder.ViewModels {
 
         // Input actions
         public Action<KeyEventArgs, bool>? KeyAction { get; set; } // isDown
-        public Action<PointerEventArgs, Vector2>? PointerMovedAction { get; set; }
-        public Action<PointerWheelEventArgs>? PointerWheelAction { get; set; }
-        public Action<PointerPressedEventArgs>? PointerPressedAction { get; set; }
-        public Action<PointerReleasedEventArgs>? PointerReleasedAction { get; set; }
+        public Action<PointerEventArgs, Vector2, AvaloniaInputState>? PointerMovedAction { get; set; }
+        public Action<PointerWheelEventArgs, AvaloniaInputState>? PointerWheelAction { get; set; }
+        public Action<PointerPressedEventArgs, AvaloniaInputState>? PointerPressedAction { get; set; }
+        public Action<PointerReleasedEventArgs, AvaloniaInputState>? PointerReleasedAction { get; set; }
 
         public ViewportViewModel(ICamera camera) {
             _camera = camera;
