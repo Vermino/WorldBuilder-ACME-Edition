@@ -275,7 +275,7 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             else if (camera is OrthographicTopDownCamera orthoCamera) {
                 orthoCamera.ProcessMouseScroll((float)e.Delta.Y);
             }
-            // SyncCameras(camera);
+            SyncCameras(camera);
         }
 
         private void HandleViewportInput(ViewportViewModel viewport, AvaloniaInputState inputState, double deltaTime) {
@@ -339,7 +339,7 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             SelectedTool?.HandleMouseMove(inputState.MouseState);
             SelectedTool?.Update(deltaTime);
 
-            // SyncCameras(camera);
+            SyncCameras(camera);
         }
 
         private void SyncCameras(ICamera source) {
@@ -373,32 +373,8 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                     }
                 }
             }
-            else if (source == orthoCam) {
-                // Sync Perspective to Ortho (X, Y only, keep offset)
-                // We want pCam to look at orthoCam.Position.X, Y
-                // But we don't want to change pCam's rotation/height necessarily, just slide it.
-                // Or do we?
-                // If we slide pCam, we keep its relative offset to the ground?
-
-                // Current P pos
-                var currentP = pCam.Position;
-
-                // We want the new "LookAt" on ground to be Ortho.X, Ortho.Y
-                // But calculating new position requires knowing the offset.
-
-                // Simplest: Just move X/Y to match. This moves the camera body.
-                // If camera is looking straight down, this is perfect.
-                // If looking at angle, it shifts the view.
-
-                // Let's stick to simple position sync for Ortho->Persp to avoid disorientation
-                // But adjust for the fact we sync'd TO the focal point before.
-                // If we sync'd Ortho to Focal Point, then Ortho.Pos IS the Focal Point (in X,Y).
-                // So if we move Persp.Pos to Ortho.Pos, we are moving the camera ON TOP of the focal point.
-                // Which is fine for TopDown behavior, but if angled, might feel weird?
-                // Actually, standard behavior for "Go To" is centering camera.
-                // Let's keep the simple sync for Ortho->Persp for now as it's predictable.
-                pCam.SetPosition(new Vector3(orthoCam.Position.X, orthoCam.Position.Y, pCam.Position.Z));
-            }
+            // One-way sync: Perspective -> Ortho.
+            // Ortho interactions (panning top-down) do not affect Perspective camera to avoid "tight leash" behavior.
         }
 
         [RelayCommand]
