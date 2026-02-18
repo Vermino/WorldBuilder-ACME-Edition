@@ -39,6 +39,7 @@ namespace WorldBuilder.Editors.Landscape {
         private GL _gl => _renderer.GraphicsDevice.GL;
         private IShader _terrainShader;
         private IShader _sphereShader;
+        private IShader _previewShader;
 
         internal readonly StaticObjectManager _objectManager;
         internal readonly EnvCellManager _envCellManager;
@@ -248,6 +249,9 @@ namespace WorldBuilder.Editors.Landscape {
             _terrainShader = _renderer.GraphicsDevice.CreateShader("Landscape",
                 GetEmbeddedResource("Chorizite.OpenGLSDLBackend.Shaders.Landscape.vert", assembly),
                 GetEmbeddedResource("Chorizite.OpenGLSDLBackend.Shaders.Landscape.frag", assembly));
+            _previewShader = _renderer.GraphicsDevice.CreateShader("Preview",
+                GetEmbeddedResource("Chorizite.OpenGLSDLBackend.Shaders.Preview.vert", assembly),
+                GetEmbeddedResource("Chorizite.OpenGLSDLBackend.Shaders.Preview.frag", assembly));
             _sphereShader = _renderer.GraphicsDevice.CreateShader("Sphere",
                 GetEmbeddedResource("WorldBuilder.Shaders.Sphere.vert", typeof(GameScene).Assembly),
                 GetEmbeddedResource("WorldBuilder.Shaders.Sphere.frag", typeof(GameScene).Assembly));
@@ -1674,26 +1678,16 @@ namespace WorldBuilder.Editors.Landscape {
         private void RenderStampPreview(ICamera camera, Matrix4x4 viewProjection) {
             if (_currentStampPreview == null || _previewVAO == 0) return;
 
-            _terrainShader.Bind();
+            _previewShader.Bind();
 
-            // Reuse terrain shader but with special uniforms or state
-            _terrainShader.SetUniform("xAmbient", AmbientLightIntensity);
-            _terrainShader.SetUniform("xWorld", Matrix4x4.Identity);
-            _terrainShader.SetUniform("xView", camera.GetViewMatrix());
-            _terrainShader.SetUniform("xProjection", camera.GetProjectionMatrix());
-            _terrainShader.SetUniform("uAlpha", 0.6f); // Semi-transparent
-
-            // Disable grid/overlays for the preview mesh
-            _terrainShader.SetUniform("uShowLandblockGrid", 0);
-            _terrainShader.SetUniform("uShowCellGrid", 0);
-            _terrainShader.SetUniform("uShowSlopeHighlight", 0);
-            _terrainShader.SetUniform("uBrushActive", 0);
-            _terrainShader.SetUniform("uPreviewActive", 0); // This is for brush texture preview
+            _previewShader.SetUniform("xAmbient", AmbientLightIntensity);
+            _previewShader.SetUniform("xWorld", Matrix4x4.Identity);
+            _previewShader.SetUniform("xView", camera.GetViewMatrix());
+            _previewShader.SetUniform("xProjection", camera.GetProjectionMatrix());
+            _previewShader.SetUniform("uAlpha", 0.6f); // Semi-transparent
 
             SurfaceManager.TerrainAtlas.Bind(0);
-            _terrainShader.SetUniform("xOverlays", 0);
-            SurfaceManager.AlphaAtlas.Bind(1);
-            _terrainShader.SetUniform("xAlphas", 1);
+            _previewShader.SetUniform("xOverlays", 0);
 
             _gl.Enable(EnableCap.Blend);
             _gl.BlendFunc(GLEnum.SrcAlpha, GLEnum.OneMinusSrcAlpha);
@@ -1707,6 +1701,7 @@ namespace WorldBuilder.Editors.Landscape {
                     null);
             }
             _gl.BindVertexArray(0);
+            _gl.UseProgram(0);
 
             _gl.Disable(EnableCap.Blend);
         }
