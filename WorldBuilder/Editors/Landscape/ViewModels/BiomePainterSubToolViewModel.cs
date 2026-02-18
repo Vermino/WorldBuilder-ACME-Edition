@@ -48,14 +48,29 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             _commandHistory = commandHistory;
 
             _availableBiomes = new ObservableCollection<BiomeDefinition> {
-                BiomeLibrary.Forest,
-                BiomeLibrary.Desert,
-                BiomeLibrary.Mountain,
-                BiomeLibrary.Swamp,
-                BiomeLibrary.Snow
+                new BiomeDefinition { Name = "Custom Brush", PrimaryTexture = TerrainTextureType.Grassland }
             };
 
             _selectedBiome = _availableBiomes.FirstOrDefault();
+        }
+
+        [RelayCommand]
+        private void CreateBiome() {
+            var newBiome = new BiomeDefinition {
+                Name = $"Biome {AvailableBiomes.Count + 1}",
+                PrimaryTexture = TerrainTextureType.Grassland
+            };
+            AvailableBiomes.Add(newBiome);
+            SelectedBiome = newBiome;
+        }
+
+        [RelayCommand]
+        private void DeleteBiome() {
+            if (SelectedBiome != null && AvailableBiomes.Count > 1) {
+                var index = AvailableBiomes.IndexOf(SelectedBiome);
+                AvailableBiomes.Remove(SelectedBiome);
+                SelectedBiome = AvailableBiomes[Math.Min(index, AvailableBiomes.Count - 1)];
+            }
         }
 
         partial void OnBrushRadiusChanged(float value) {
