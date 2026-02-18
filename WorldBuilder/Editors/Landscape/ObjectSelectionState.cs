@@ -68,6 +68,12 @@ namespace WorldBuilder.Editors.Landscape {
         public List<StaticObject>? PlacementPreviewMulti { get; set; }
 
         /// <summary>
+        /// Bounds of the selection preview (for Clone tool).
+        /// Vector4: (MinX, MinY, MaxX, MaxY)
+        /// </summary>
+        public Vector4? SelectionPreviewBounds { get; set; }
+
+        /// <summary>
         /// Clears selection and selects a single object (standard click).
         /// </summary>
         public void Select(StaticObject obj, ushort landblockKey, int objectIndex, bool isScenery) {

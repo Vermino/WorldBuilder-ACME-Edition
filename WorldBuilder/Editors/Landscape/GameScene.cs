@@ -1464,6 +1464,11 @@ namespace WorldBuilder.Editors.Landscape {
                 RenderPlacementPreview(editingContext.ObjectSelection.PlacementPreview.Value, camera, viewProjection);
             }
 
+            // Render selection preview bounds (Clone tool)
+            if (editingContext.ObjectSelection.SelectionPreviewBounds.HasValue) {
+                RenderSelectionBounds(editingContext.ObjectSelection.SelectionPreviewBounds.Value, camera, viewProjection, editingContext);
+            }
+
             // Process thumbnail rendering at end of Render() where GL state is known-good.
             // Running during Update() produced blank FBOs because Avalonia's UI renderer
             // leaves GL state (programs, attributes, etc.) in an unknown configuration.
@@ -1603,6 +1608,55 @@ namespace WorldBuilder.Editors.Landscape {
 
             var objects = new List<StaticObject> { previewObj };
             RenderStaticObjects(objects, camera, viewProjection);
+        }
+
+        private unsafe void RenderSelectionBounds(Vector4 bounds, ICamera camera, Matrix4x4 viewProjection, TerrainEditingContext editingContext) {
+            // Bounds are (MinX, MinY, MaxX, MaxY)
+            // We want to draw spheres at the 4 corners at terrain height
+            var corners = new Vector4[4];
+            float radius = 1.0f; // Small markers
+
+            // Corner 1: MinX, MinY
+            float h1 = editingContext.GetHeightAtPosition(bounds.X, bounds.Y);
+            corners[0] = new Vector4(bounds.X, bounds.Y, h1, radius);
+
+            // Corner 2: MaxX, MinY
+            float h2 = editingContext.GetHeightAtPosition(bounds.Z, bounds.Y);
+            corners[1] = new Vector4(bounds.Z, bounds.Y, h2, radius);
+
+            // Corner 3: MaxX, MaxY
+            float h3 = editingContext.GetHeightAtPosition(bounds.Z, bounds.W);
+            corners[2] = new Vector4(bounds.Z, bounds.W, h3, radius);
+
+            // Corner 4: MinX, MaxY
+            float h4 = editingContext.GetHeightAtPosition(bounds.X, bounds.W);
+            corners[3] = new Vector4(bounds.X, bounds.W, h4, radius);
+
+            // Draw Spheres
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+
+            _sphereShader.Bind();
+            _sphereShader.SetUniform("uViewProjection", viewProjection);
+            _sphereShader.SetUniform("uCameraPosition", camera.Position);
+            _sphereShader.SetUniform("uSphereColor", new Vector3(0.0f, 1.0f, 0.0f)); // Green
+            _sphereShader.SetUniform("uLightDirection", Vector3.Normalize(LightDirection));
+            _sphereShader.SetUniform("uAmbientIntensity", 0.8f);
+            _sphereShader.SetUniform("uSpecularPower", SpecularPower);
+            _sphereShader.SetUniform("uGlowColor", new Vector3(0.0f, 1.0f, 0.0f));
+            _sphereShader.SetUniform("uGlowIntensity", 1.0f);
+            _sphereShader.SetUniform("uGlowPower", 0.5f);
+
+            _gl.BindBuffer(GLEnum.ArrayBuffer, _sphereInstanceVBO);
+            fixed (Vector4* ptr = corners) {
+                _gl.BufferData(GLEnum.ArrayBuffer, (nuint)(4 * sizeof(Vector4)), ptr, GLEnum.DynamicDraw);
+            }
+
+            _gl.BindVertexArray(_sphereVAO);
+            _gl.DrawElementsInstanced(GLEnum.Triangles, (uint)_sphereIndexCount, GLEnum.UnsignedInt, null, 4);
+            _gl.BindVertexArray(0);
+            _gl.UseProgram(0);
+            _gl.Disable(EnableCap.Blend);
         }
 
         private void RenderTerrain(

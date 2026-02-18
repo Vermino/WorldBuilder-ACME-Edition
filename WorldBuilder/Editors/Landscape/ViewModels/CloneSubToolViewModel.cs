@@ -41,6 +41,7 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
 
         public override void OnDeactivated() {
             _isSelecting = false;
+            Context.ObjectSelection.SelectionPreviewBounds = null;
         }
 
         public override bool HandleMouseDown(MouseState mouseState) {
@@ -50,7 +51,11 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             _selectionStart = new Vector2(
                 mouseState.TerrainHit.Value.HitPosition.X,
                 mouseState.TerrainHit.Value.HitPosition.Y);
+
+            // Initializing end point to start point to avoid jumping
+            _selectionEnd = _selectionStart;
             _isSelecting = true;
+            UpdateSelectionPreview();
 
             return true;
         }
@@ -74,12 +79,25 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
 
             _isSelecting = false;
             CaptureStamp();
+            Context.ObjectSelection.SelectionPreviewBounds = null;
 
             return true;
         }
 
         private void UpdateSelectionPreview() {
-            // TODO Sprint 4: Add shader-based selection box preview
+            var minX = MathF.Min(_selectionStart.X, _selectionEnd.X);
+            var maxX = MathF.Max(_selectionStart.X, _selectionEnd.X);
+            var minY = MathF.Min(_selectionStart.Y, _selectionEnd.Y);
+            var maxY = MathF.Max(_selectionStart.Y, _selectionEnd.Y);
+
+            // Snap to cell boundaries (24 units)
+            // Same logic as CaptureStamp to ensure preview matches result
+            minX = MathF.Floor(minX / 24f) * 24f;
+            minY = MathF.Floor(minY / 24f) * 24f;
+            maxX = MathF.Ceiling(maxX / 24f) * 24f;
+            maxY = MathF.Ceiling(maxY / 24f) * 24f;
+
+            Context.ObjectSelection.SelectionPreviewBounds = new Vector4(minX, minY, maxX, maxY);
         }
 
         private void CaptureStamp() {
