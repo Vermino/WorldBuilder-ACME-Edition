@@ -1,28 +1,19 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
-using DatReaderWriter.Enums;
-using System;
-using System.Collections.Generic;
+using CommunityToolkit.Mvvm.ComponentModel;
 using System.Collections.ObjectModel;
-using System.Linq;
-using System.Numerics;
 using WorldBuilder.Lib;
-using WorldBuilder.Shared.Documents;
 
 namespace WorldBuilder.Editors.Landscape.ViewModels {
-    public partial class TexturePaintingToolViewModel : ToolViewModelBase {
-        public override string Name => "Terrain";
-        public override string IconGlyph => "🖌️";
+    public partial class BiomeToolViewModel : ToolViewModelBase {
+        public override string Name => "Biome";
+        public override string IconGlyph => "🌳";
 
         [ObservableProperty]
         private ObservableCollection<SubToolViewModelBase> _subTools = new();
 
         public override ObservableCollection<SubToolViewModelBase> AllSubTools => SubTools;
 
-        public TexturePaintingToolViewModel(
-            BrushSubToolViewModel brushSubTool,
-            BucketFillSubToolViewModel bucketFillSubTool) {
-            SubTools.Add(brushSubTool);
-            SubTools.Add(bucketFillSubTool);
+        public BiomeToolViewModel(BiomePainterSubToolViewModel biomePainterSubTool) {
+            SubTools.Add(biomePainterSubTool);
         }
 
         public override void OnActivated() {

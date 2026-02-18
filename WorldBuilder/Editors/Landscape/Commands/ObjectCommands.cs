@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using WorldBuilder.Lib.History;
 using WorldBuilder.Shared.Documents;
@@ -219,6 +220,95 @@ namespace WorldBuilder.Editors.Landscape.Commands {
             if (_objectIndex <= doc.StaticObjectCount) {
                 doc.AddStaticObject(_removedObject);
             }
+            _context.TerrainSystem.Scene.InvalidateStaticObjectsCache();
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Command to add multiple static objects to various landblocks.
+    /// </summary>
+    public class BatchAddObjectCommand : ICommand {
+        private readonly TerrainEditingContext _context;
+        private readonly List<(ushort LandblockKey, StaticObject Object)> _objects;
+        private readonly List<(ushort LandblockKey, int AddedIndex)> _addedIndices = new();
+        private bool _alreadyApplied;
+
+        public string Description => $"Add {_objects.Count} objects";
+        public bool CanExecute => true;
+        public bool CanUndo => true;
+        public List<string> AffectedDocumentIds {
+            get {
+                var ids = new HashSet<string>();
+                foreach (var (key, _) in _objects) {
+                    ids.Add($"landblock_{key:X4}");
+                }
+                return new List<string>(ids);
+            }
+        }
+
+        public BatchAddObjectCommand(
+            TerrainEditingContext context,
+            List<(ushort LandblockKey, StaticObject Object)> objects,
+            List<(ushort LandblockKey, int AddedIndex)>? preAppliedIndices = null) {
+            _context = context;
+            _objects = objects;
+
+            if (preAppliedIndices != null) {
+                _addedIndices.AddRange(preAppliedIndices);
+                _alreadyApplied = true;
+            }
+        }
+
+        public bool Execute() {
+            if (_alreadyApplied) {
+                _alreadyApplied = false;
+                return true;
+            }
+
+            _addedIndices.Clear();
+            var docCache = new Dictionary<ushort, LandblockDocument>();
+
+            foreach (var (key, obj) in _objects) {
+                if (!docCache.TryGetValue(key, out var doc)) {
+                    var docId = $"landblock_{key:X4}";
+                    doc = _context.TerrainSystem.DocumentManager
+                        .GetOrCreateDocumentAsync<LandblockDocument>(docId).GetAwaiter().GetResult();
+                    if (doc != null) docCache[key] = doc;
+                }
+
+                if (doc != null) {
+                    int index = doc.AddStaticObject(obj);
+                    _addedIndices.Add((key, index));
+
+                    // Eagerly load render data so the object renders immediately
+                    _context.TerrainSystem.Scene._objectManager.GetRenderData(obj.Id, obj.IsSetup);
+                }
+            }
+
+            _context.TerrainSystem.Scene.InvalidateStaticObjectsCache();
+            return true;
+        }
+
+        public bool Undo() {
+            var docCache = new Dictionary<ushort, LandblockDocument>();
+
+            // Remove in reverse order of addition to preserve indices
+            for (int i = _addedIndices.Count - 1; i >= 0; i--) {
+                var (key, index) = _addedIndices[i];
+                if (!docCache.TryGetValue(key, out var doc)) {
+                    var docId = $"landblock_{key:X4}";
+                    doc = _context.TerrainSystem.DocumentManager
+                        .GetOrCreateDocumentAsync<LandblockDocument>(docId).GetAwaiter().GetResult();
+                    if (doc != null) docCache[key] = doc;
+                }
+
+                if (doc != null) {
+                    doc.RemoveStaticObject(index);
+                }
+            }
+
+            _context.ObjectSelection.Deselect();
             _context.TerrainSystem.Scene.InvalidateStaticObjectsCache();
             return true;
         }

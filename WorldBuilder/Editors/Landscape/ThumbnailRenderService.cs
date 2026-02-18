@@ -19,6 +19,11 @@ namespace WorldBuilder.Editors.Landscape {
         private readonly GL _gl;
         private readonly StaticObjectManager _objectManager;
 
+        // Expose cache for ViewModels
+        public Lib.ThumbnailCache Cache { get; } = new(System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WorldBuilder", "ThumbnailCache"));
+
         // Offscreen FBO resources
         private uint _fbo;
         private uint _colorTexture;
