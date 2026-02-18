@@ -76,23 +76,23 @@ namespace WorldBuilder.Views.Components.Viewports {
         }
 
         protected override void OnGlPointerMoved(PointerEventArgs e, Vector2 mousePositionScaled) {
-             _viewModel?.PointerMovedAction?.Invoke(e, mousePositionScaled);
+             _viewModel?.PointerMovedAction?.Invoke(e, mousePositionScaled, InputState);
         }
 
         protected override void OnGlPointerWheelChanged(PointerWheelEventArgs e) {
-            _viewModel?.PointerWheelAction?.Invoke(e);
+            _viewModel?.PointerWheelAction?.Invoke(e, InputState);
         }
 
         protected override void OnGlPointerPressed(PointerPressedEventArgs e) {
             // Force update mouse state with pressed button flags before invoking command
             UpdateMouseState(e.GetPosition(this), e.GetCurrentPoint(this).Properties);
-            _viewModel?.PointerPressedAction?.Invoke(e);
+            _viewModel?.PointerPressedAction?.Invoke(e, InputState);
             e.Pointer.Capture(this);
         }
 
         protected override void OnGlPointerReleased(PointerReleasedEventArgs e) {
             UpdateMouseState(e.GetPosition(this), e.GetCurrentPoint(this).Properties);
-            _viewModel?.PointerReleasedAction?.Invoke(e);
+            _viewModel?.PointerReleasedAction?.Invoke(e, InputState);
             e.Pointer.Capture(null);
         }
 

@@ -114,11 +114,14 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             pViewport.RenderAction = (dt, size, input) => RenderViewport(pViewport, dt, size, input);
             orthoViewport.RenderAction = (dt, size, input) => RenderViewport(orthoViewport, dt, size, input);
 
-            pViewport.PointerWheelAction = (e) => HandleViewportWheel(pViewport, e);
-            orthoViewport.PointerWheelAction = (e) => HandleViewportWheel(orthoViewport, e);
+            pViewport.PointerWheelAction = (e, inputState) => HandleViewportWheel(pViewport, e);
+            orthoViewport.PointerWheelAction = (e, inputState) => HandleViewportWheel(orthoViewport, e);
 
-            pViewport.PointerPressedAction = (e) => HandleViewportClick(pViewport, e);
-            orthoViewport.PointerPressedAction = (e) => HandleViewportClick(orthoViewport, e);
+            pViewport.PointerPressedAction = (e, inputState) => HandleViewportPressed(pViewport, e, inputState);
+            orthoViewport.PointerPressedAction = (e, inputState) => HandleViewportPressed(orthoViewport, e, inputState);
+
+            pViewport.PointerReleasedAction = (e, inputState) => HandleViewportReleased(pViewport, e, inputState);
+            orthoViewport.PointerReleasedAction = (e, inputState) => HandleViewportReleased(orthoViewport, e, inputState);
 
             Viewports.Add(pViewport);
             Viewports.Add(orthoViewport);
@@ -253,10 +256,15 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             SelectedTool?.RenderOverlay(viewport.Renderer, viewport.Camera, (float)canvasSize.Width / canvasSize.Height);
         }
 
-        private void HandleViewportClick(ViewportViewModel viewport, PointerPressedEventArgs e) {
+        private void HandleViewportPressed(ViewportViewModel viewport, PointerPressedEventArgs e, AvaloniaInputState inputState) {
             foreach (var v in Viewports) {
                 v.IsActive = v == viewport;
             }
+            SelectedTool?.HandleMouseDown(inputState.MouseState);
+        }
+
+        private void HandleViewportReleased(ViewportViewModel viewport, PointerReleasedEventArgs e, AvaloniaInputState inputState) {
+            SelectedTool?.HandleMouseUp(inputState.MouseState);
         }
 
         private void HandleViewportWheel(ViewportViewModel viewport, PointerWheelEventArgs e) {
