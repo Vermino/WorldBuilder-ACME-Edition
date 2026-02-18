@@ -1,3 +1,4 @@
+using Avalonia.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using System.Collections.ObjectModel;
 using WorldBuilder.Lib;

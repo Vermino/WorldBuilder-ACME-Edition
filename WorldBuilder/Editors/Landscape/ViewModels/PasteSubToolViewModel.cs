@@ -212,12 +212,14 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         }
 
         public override bool HandleKeyDown(KeyEventArgs e) {
-            if (e.Key == Key.RightBracket || (e.Key == Key.R && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))) {
-                RotateClockwise();
+            // [ = Rotate Left (CCW)
+            if (e.Key == Key.LeftBracket) {
+                RotateCounterClockwise();
                 return true;
             }
-            if (e.Key == Key.LeftBracket || (e.Key == Key.R && e.KeyModifiers.HasFlag(KeyModifiers.Shift))) {
-                RotateCounterClockwise();
+            // ] = Rotate Right (CW)
+            if (e.Key == Key.RightBracket) {
+                RotateClockwise();
                 return true;
             }
             return false;
