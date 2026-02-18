@@ -261,6 +261,9 @@ namespace WorldBuilder.Editors.Landscape {
 
             long staticMs = sw.ElapsedMilliseconds;
 
+            // Collect dirty chunks first to update all contexts before clearing dirty flags
+            var dirtyChunks = new HashSet<TerrainChunk>();
+
             foreach (var context in _contexts.Values) {
                 foreach (var chunkId in requiredChunks) {
                     var chunkX = (uint)(chunkId >> 32);
@@ -271,10 +274,16 @@ namespace WorldBuilder.Editors.Landscape {
                         QueueChunkForGeneration(chunk, context);
                     }
                     else if (chunk.IsDirty) {
-                        var dirtyLandblocks = chunk.DirtyLandblocks.ToList();
-                        context.GPUManager.UpdateLandblocks(chunk, dirtyLandblocks, _terrainSystem);
+                        dirtyChunks.Add(chunk);
+                        // Pass clearDirty: false to preserve the flag for other contexts
+                        context.GPUManager.UpdateLandblocks(chunk, chunk.DirtyLandblocks, _terrainSystem, clearDirty: false);
                     }
                 }
+            }
+
+            // Now clear dirty flags after all contexts have been updated
+            foreach (var chunk in dirtyChunks) {
+                chunk.ClearDirty();
             }
 
             long totalMs = sw.ElapsedMilliseconds;
