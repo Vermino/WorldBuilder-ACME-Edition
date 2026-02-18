@@ -99,6 +99,7 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
 
             Tools.Add(TerrainSystem.Services.GetRequiredService<SelectorToolViewModel>());
             Tools.Add(TerrainSystem.Services.GetRequiredService<TexturePaintingToolViewModel>());
+            Tools.Add(TerrainSystem.Services.GetRequiredService<BiomeToolViewModel>());
             Tools.Add(TerrainSystem.Services.GetRequiredService<RoadDrawingToolViewModel>());
             Tools.Add(TerrainSystem.Services.GetRequiredService<HeightToolViewModel>());
 

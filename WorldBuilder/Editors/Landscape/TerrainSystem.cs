@@ -59,6 +59,7 @@ namespace WorldBuilder.Editors.Landscape {
             collection.AddSingleton<BrushSubToolViewModel>();
             collection.AddSingleton<BucketFillSubToolViewModel>();
             collection.AddSingleton<BiomePainterSubToolViewModel>();
+            collection.AddSingleton<BiomeToolViewModel>();
             collection.AddSingleton<TexturePaintingToolViewModel>();
             collection.AddSingleton<HeightRaiseLowerSubToolViewModel>();
             collection.AddSingleton<HeightSetSubToolViewModel>();

@@ -32,6 +32,9 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
         [ObservableProperty]
         private bool _autoPlaceObjects = true;
 
+        [ObservableProperty]
+        private List<TerrainTextureType> _availableTerrainTypes;
+
         private bool _isPainting;
         private Vector3 _currentHitPosition;
         private readonly CommandHistory _commandHistory;
@@ -52,6 +55,9 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             };
 
             _selectedBiome = _availableBiomes.FirstOrDefault();
+
+            _availableTerrainTypes = context.TerrainSystem.Scene.SurfaceManager.GetAvailableTerrainTextures()
+                .Select(t => t.TerrainType).ToList();
         }
 
         [RelayCommand]
