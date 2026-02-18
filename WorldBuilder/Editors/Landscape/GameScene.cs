@@ -1609,6 +1609,7 @@ namespace WorldBuilder.Editors.Landscape {
 
         public void SetStampPreview(TerrainStamp? stamp, Vector2 worldPosition, float zOffset) {
             if (stamp == null) {
+                if (_currentStampPreview != null) Console.WriteLine("[Preview] Clearing preview");
                 _currentStampPreview = null;
                 return;
             }
@@ -1616,6 +1617,8 @@ namespace WorldBuilder.Editors.Landscape {
             var heightTable = _terrainSystem.Region.LandDefs.LandHeightTable;
             _currentStampPreview = WorldBuilder.Rendering.PreviewMeshGenerator.GenerateStampPreview(
                 stamp, worldPosition, zOffset, heightTable);
+
+            Console.WriteLine($"[Preview] Set preview: {stamp.WidthInVertices}x{stamp.HeightInVertices} at {worldPosition}, Z+{zOffset}. Verts: {_currentStampPreview.Vertices.Length}, Indices: {_currentStampPreview.Indices.Length}");
 
             UploadPreviewMesh();
         }
@@ -1678,23 +1681,23 @@ namespace WorldBuilder.Editors.Landscape {
         private void RenderStampPreview(ICamera camera, Matrix4x4 viewProjection) {
             if (_currentStampPreview == null || _previewVAO == 0) return;
 
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(GLEnum.SrcAlpha, GLEnum.OneMinusSrcAlpha);
+            _gl.Disable(EnableCap.CullFace); // Disable culling to ensure visibility from any angle
+
             _previewShader.Bind();
 
             // Check errors after bind
             GLHelpers.CheckErrors();
 
             _previewShader.SetUniform("xAmbient", AmbientLightIntensity);
-            _previewShader.SetUniform("uAlpha", 0.6f); // Ensure alpha is set
             _previewShader.SetUniform("xWorld", Matrix4x4.Identity);
             _previewShader.SetUniform("xView", camera.GetViewMatrix());
             _previewShader.SetUniform("xProjection", camera.GetProjectionMatrix());
-            _previewShader.SetUniform("uAlpha", 0.6f); // Semi-transparent
+            _previewShader.SetUniform("uAlpha", 0.8f); // High alpha for visibility
 
             SurfaceManager.TerrainAtlas.Bind(0);
             _previewShader.SetUniform("xOverlays", 0);
-
-            _gl.Enable(EnableCap.Blend);
-            _gl.BlendFunc(GLEnum.SrcAlpha, GLEnum.OneMinusSrcAlpha);
 
             _gl.BindVertexArray(_previewVAO);
             unsafe {
@@ -1707,6 +1710,7 @@ namespace WorldBuilder.Editors.Landscape {
             _gl.BindVertexArray(0);
             _gl.UseProgram(0);
 
+            _gl.Enable(EnableCap.CullFace); // Restore defaults
             _gl.Disable(EnableCap.Blend);
         }
 

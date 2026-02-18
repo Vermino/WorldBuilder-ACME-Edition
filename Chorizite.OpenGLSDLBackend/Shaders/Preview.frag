@@ -11,12 +11,15 @@ in vec3 vTexCoord;
 out vec4 FragColor;
 
 void main() {
-    vec4 color = texture(xOverlays, vTexCoord);
-    // Use a greenish tint to make it visible against terrain, ignoring lighting for now
-    vec3 tintedColor = color.rgb * vec3(0.8, 1.0, 0.8);
+    // Sample preview texture using array index
+    vec4 previewColor = texture(xOverlays, vTexCoord);
 
-    // Ensure we can see something even if texture alpha is low (e.g. grass)
-    float alpha = max(color.a, 0.3) * uAlpha;
+    // Apply ghostly effect (slightly desaturated, semi-transparent)
+    vec3 desaturated = mix(
+        previewColor.rgb,
+        vec3(dot(previewColor.rgb, vec3(0.299, 0.587, 0.114))),
+        0.3 // 30% desaturation
+    );
 
-    FragColor = vec4(tintedColor, alpha);
+    FragColor = vec4(desaturated, previewColor.a * uAlpha);
 }

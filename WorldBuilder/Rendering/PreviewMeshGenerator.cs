@@ -27,7 +27,8 @@ namespace WorldBuilder.Rendering {
 
                     int stampIndex = vx * stamp.HeightInVertices + vy;
                     byte heightIndex = stamp.Heights[stampIndex];
-                    float worldZ = landHeightTable[heightIndex] + zOffset;
+                    // Add 2.0f to ensure it renders slightly above the actual terrain
+                    float worldZ = landHeightTable[heightIndex] + zOffset + 2.0f;
 
                     // Unpack terrain type for texture lookup
                     ushort terrainWord = stamp.TerrainTypes[stampIndex];
