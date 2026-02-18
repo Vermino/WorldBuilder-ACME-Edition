@@ -6,8 +6,8 @@ namespace WorldBuilder.Lib {
     public static class BiomeLibrary {
         public static BiomeDefinition Forest => new() {
             Name = "Forest",
-            PrimaryTexture = TerrainTextureType.Grass,
-            SecondaryTexture = TerrainTextureType.GrassDark,
+            PrimaryTexture = TerrainTextureType.Grassland,
+            SecondaryTexture = TerrainTextureType.ForestFloor,
             SecondaryMix = 0.3f,
             Objects = new() {
                 new() { ObjectId = 0x010001A7, Density = 0.3f, MinScale = 0.8f, MaxScale = 1.2f }, // Oak tree
@@ -19,8 +19,8 @@ namespace WorldBuilder.Lib {
 
         public static BiomeDefinition Desert => new() {
             Name = "Desert",
-            PrimaryTexture = TerrainTextureType.Sand,
-            SecondaryTexture = TerrainTextureType.SandDark,
+            PrimaryTexture = TerrainTextureType.SandYellow,
+            SecondaryTexture = TerrainTextureType.SandGrey,
             SecondaryMix = 0.15f,
             Objects = new() {
                 new() { ObjectId = 0x01000245, Density = 0.05f }, // Cactus
@@ -31,8 +31,8 @@ namespace WorldBuilder.Lib {
 
         public static BiomeDefinition Mountain => new() {
             Name = "Mountain",
-            PrimaryTexture = TerrainTextureType.Rock,
-            SecondaryTexture = TerrainTextureType.Rock2,
+            PrimaryTexture = TerrainTextureType.BarrenRock,
+            SecondaryTexture = TerrainTextureType.SedimentaryRock,
             SecondaryMix = 0.4f,
             Objects = new() {
                 new() { ObjectId = 0x01000246, Density = 0.1f, MinScale = 0.8f, MaxScale = 2.0f }, // Large Rock
@@ -42,8 +42,8 @@ namespace WorldBuilder.Lib {
 
         public static BiomeDefinition Swamp => new() {
             Name = "Swamp",
-            PrimaryTexture = TerrainTextureType.Mud,
-            SecondaryTexture = TerrainTextureType.Water,
+            PrimaryTexture = TerrainTextureType.MudRichDirt,
+            SecondaryTexture = TerrainTextureType.MarshSparseSwamp,
             SecondaryMix = 0.1f,
             Objects = new() {
                 new() { ObjectId = 0x01000247, Density = 0.15f, MinScale = 0.8f, MaxScale = 1.2f } // Dead tree

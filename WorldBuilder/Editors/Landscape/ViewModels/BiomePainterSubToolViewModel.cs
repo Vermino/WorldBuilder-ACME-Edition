@@ -251,10 +251,11 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
                     if (slope < objDef.MinSlope || slope > objDef.MaxSlope)
                         continue;
 
-                    float z = Context.TerrainSystem.GetHeightAtPosition(x, y);
+                    float z = Context.GetHeightAtPosition(x, y);
 
                     // Random scale and rotation
-                    float scale = MathF.Lerp(objDef.MinScale, objDef.MaxScale, (float)_random.NextDouble());
+                    float scaleT = (float)_random.NextDouble();
+                    float scale = objDef.MinScale + (objDef.MaxScale - objDef.MinScale) * scaleT;
                     var rotation = Quaternion.CreateFromAxisAngle(
                         Vector3.UnitZ, (float)_random.NextDouble() * MathF.PI * 2f);
 
@@ -295,9 +296,9 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
 
         private float CalculateSlopeAtPosition(float x, float y) {
             // Simple slope calculation using neighbors
-            float h = Context.TerrainSystem.GetHeightAtPosition(x, y);
-            float hx = Context.TerrainSystem.GetHeightAtPosition(x + 1f, y);
-            float hy = Context.TerrainSystem.GetHeightAtPosition(x, y + 1f);
+            float h = Context.GetHeightAtPosition(x, y);
+            float hx = Context.GetHeightAtPosition(x + 1f, y);
+            float hy = Context.GetHeightAtPosition(x, y + 1f);
 
             Vector3 v1 = new Vector3(1f, 0, hx - h);
             Vector3 v2 = new Vector3(0, 1f, hy - h);
@@ -337,7 +338,7 @@ namespace WorldBuilder.Editors.Landscape.ViewModels {
             // Check if already exists
             if (_selectedBiome.Objects.Any(o => o.ObjectId == objectId)) return;
 
-            _selectedBiome.Objects.Add(new BiomeDefinition.BiomeObject {
+            _selectedBiome.Objects.Add(new BiomeObject {
                 ObjectId = objectId,
                 Density = 0.1f // Default density
             });

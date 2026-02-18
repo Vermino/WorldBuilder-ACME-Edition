@@ -33,9 +33,9 @@ namespace WorldBuilder.Editors.Landscape.Commands {
             _context = context;
             _biomeName = biomeName;
 
-            // We pass a dummy type (Grass) because the changes dictionary contains the actual values.
+            // We pass a dummy type (Grassland) because the changes dictionary contains the actual values.
             // The inner command's description is ignored/wrapped by this command.
-            _paintCommand = new PaintCommand(context, TerrainTextureType.Grass, textureChanges);
+            _paintCommand = new PaintCommand(context, TerrainTextureType.Grassland, textureChanges);
 
             _addObjectCommand = new BatchAddObjectCommand(context, newObjects, preAppliedIndices);
         }

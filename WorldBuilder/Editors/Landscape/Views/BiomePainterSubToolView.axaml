@@ -42,7 +42,7 @@
                 <ScrollViewer MaxHeight="400">
                     <ItemsControl ItemsSource="{Binding SelectedBiome.Objects}">
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="models:BiomeDefinition.BiomeObject">
+                            <DataTemplate x:DataType="models:BiomeObject">
                                 <Expander HorizontalAlignment="Stretch" Margin="0,0,0,5">
                                     <Expander.Header>
                                         <TextBlock Text="{Binding ObjectId, StringFormat='ID: 0x{0:X8}'}" FontWeight="SemiBold" />
