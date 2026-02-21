@@ -253,16 +253,28 @@ namespace WorldBuilder.Shared.Documents {
         private static bool IsEnvCellId(ushort cellId) => cellId >= 0x0100 && cellId <= 0xFFFD;
 
         /// <summary>
-        /// Walks a building's portal graph to collect all EnvCell IDs (the CCCC portion, 0x0100-0xFFFD)
-        /// that belong to this building. Starts from BuildingPortal.OtherCellId and StabList,
-        /// then follows CellPortal links in each discovered EnvCell.
+        /// Builds a map from EnvCell number (low 16 bits of cell ID) to the BuildingInfo that owns that cell.
+        /// Used so interior EnvCells can be placed 1:1 with the building exterior (same frame).
         /// </summary>
+        public static Dictionary<ushort, BuildingInfo> GetCellToBuildingMap(LandBlockInfo lbi, IDatReaderWriter datAccess, uint lbId) {
+            var map = new Dictionary<ushort, BuildingInfo>();
+            if (lbi.Buildings == null) return map;
+            var excluded = new HashSet<ushort>();
+            foreach (var building in lbi.Buildings) {
+                var cellIds = CollectBuildingCellIdsStatic(building, datAccess, lbId, excluded);
+                foreach (var cellNum in cellIds)
+                    map.TryAdd(cellNum, building);
+                excluded.UnionWith(cellIds);
+            }
+            return map;
+        }
+
         /// <summary>
         /// Walks a building's portal graph to collect all EnvCell IDs (0x0100-0xFFFD).
         /// An optional exclusion set prevents the BFS from crossing into cells belonging
         /// to other buildings in the same landblock (fixes duplicate building conflicts).
         /// </summary>
-        private HashSet<ushort> CollectBuildingCellIds(BuildingInfo building, IDatReaderWriter datAccess, uint lbId,
+        private static HashSet<ushort> CollectBuildingCellIdsStatic(BuildingInfo building, IDatReaderWriter datAccess, uint lbId,
             HashSet<ushort>? excludeCellIds = null) {
             var cellIds = new HashSet<ushort>();
             var toVisit = new Queue<ushort>();
@@ -299,6 +311,10 @@ namespace WorldBuilder.Shared.Documents {
 
             return cellIds;
         }
+
+        private HashSet<ushort> CollectBuildingCellIds(BuildingInfo building, IDatReaderWriter datAccess, uint lbId,
+            HashSet<ushort>? excludeCellIds = null) =>
+            CollectBuildingCellIdsStatic(building, datAccess, lbId, excludeCellIds);
 
         /// <summary>
         /// Moves all EnvCells belonging to a building by applying a position delta and rotation delta.

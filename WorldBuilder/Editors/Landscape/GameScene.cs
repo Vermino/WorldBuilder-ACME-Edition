@@ -1740,6 +1740,9 @@ namespace WorldBuilder.Editors.Landscape {
                     batch.TextureArray.Bind(0);
                     context.ObjectManager._objectShader.SetUniform("uTextureArray", 0);
                     context.ObjectManager._objectShader.SetUniform("uTextureIndex", (float)batch.TextureIndex);
+                    // Shader samples layer from attribute 7 (aTextureIndex); set constant so we don't use stale value from EnvCell or previous object
+                    gl.DisableVertexAttribArray(7);
+                    gl.VertexAttrib1((uint)7, (float)batch.TextureIndex);
 
                     gl.BindBuffer(GLEnum.ElementArrayBuffer, batch.IBO);
                     gl.DrawElementsInstanced(GLEnum.Triangles, (uint)batch.IndexCount, GLEnum.UnsignedShort, null, (uint)instanceTransforms.Count);

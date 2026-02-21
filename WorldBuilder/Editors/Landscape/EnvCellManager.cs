@@ -135,9 +135,12 @@ namespace WorldBuilder.Editors.Landscape {
         /// ACViewer-style depth hack: push underground dungeon geometry well below the
         /// terrain/water surface to eliminate Z-fighting. Dungeon-only landblocks (cells
         /// at negative Z with no surface buildings) get bumped down by this amount.
-        /// Building interiors get a small +0.05 bump instead (applied in PrepareEnvCell).
+        /// Building interiors get a small positive Z bump so the floor sits above terrain
+        /// and avoids floor/terrain Z-fighting (flashing).
         /// </summary>
         private const float DungeonDepthOffset = -50f;
+        /// <summary>World-space Z offset so building floor sits above terrain and wins depth; 0.05 was insufficient.</summary>
+        private const float BuildingFloorOffset = 0.2f;
 
         public PreparedEnvCellBatch? PrepareLandblockEnvCells(ushort lbKey, uint lbId, List<EnvCell> envCells, bool isDungeonOnly = false) {
             if (envCells.Count == 0) return null;
@@ -152,14 +155,15 @@ namespace WorldBuilder.Editors.Landscape {
             var blockY = lbId & 0xFF;
             var lbOffset = new Vector3(blockX * 192f, blockY * 192f, 0f);
 
-            // Dungeon-only landblocks (no buildings on surface) get pushed well below the
-            // terrain/water to eliminate Z-fighting. Building interiors are left at their
-            // original Z since they need to align with the overworld surface.
+            // Dungeon-only landblocks get pushed well below terrain. Building interiors
+            // get a small positive Z bump so the floor renders above terrain and avoids Z-fighting.
             float dungeonZBump = isDungeonOnly ? DungeonDepthOffset : 0f;
+            float buildingZBump = isDungeonOnly ? 0f : BuildingFloorOffset;
 
             foreach (var envCell in envCells) {
                 try {
-                    var prepared = PrepareEnvCell(envCell, lbOffset, lbKey, dungeonZBump);
+                    float cellZBump = isDungeonOnly ? dungeonZBump : buildingZBump;
+                    var prepared = PrepareEnvCell(envCell, lbOffset, lbKey, cellZBump);
                     if (prepared != null) {
                         batch.Cells.Add(prepared);
                     }
@@ -168,7 +172,7 @@ namespace WorldBuilder.Editors.Landscape {
                     // Stab Frame.Origin is in landblock-local space (confirmed by diagnostic).
                     // Route to dungeon vs building list based on landblock type.
                     if (envCell.StaticObjects != null && envCell.StaticObjects.Count > 0) {
-                        var stabZOffset = new Vector3(0, 0, dungeonZBump);
+                        var stabZOffset = new Vector3(0, 0, cellZBump);
                         var targetList = isDungeonOnly ? batch.DungeonStaticObjects : batch.BuildingStaticObjects;
                         var parentCellList = isDungeonOnly ? batch.DungeonStaticParentCells : batch.BuildingStaticParentCells;
                         foreach (var stab in envCell.StaticObjects) {
@@ -218,14 +222,12 @@ namespace WorldBuilder.Editors.Landscape {
             }
 
             // Build the world transform from EnvCell position + landblock offset.
-            // Dungeon cells get -50 Z bump to push below terrain/water.
-            // Building cells get no offset — terrain PolygonOffset(1,1) handles
-            // floor vs terrain, and zero offset keeps interior geometry aligned
-            // with the exterior model so it doesn't bleed through walls/dome.
+            // Dungeon cells get -50 Z bump; building cells get +0.2 Z so floor wins over terrain.
             var cellOrigin = envCell.Position.Origin + lbOffset;
             cellOrigin.Z += dungeonZBump;
-            var worldTransform = Matrix4x4.CreateFromQuaternion(envCell.Position.Orientation)
-                * Matrix4x4.CreateTranslation(cellOrigin);
+            // Match AC Frame::localtoglobal: world = R*local + origin (translation after rotation).
+            var worldTransform = Matrix4x4.CreateTranslation(cellOrigin)
+                * Matrix4x4.CreateFromQuaternion(envCell.Position.Orientation);
 
             // Resolve surface IDs (EnvCell surfaces are not fully qualified, OR with 0x08000000)
             var surfaceIds = new List<uint>();
@@ -759,9 +761,9 @@ namespace WorldBuilder.Editors.Landscape {
                 }
             }
 
-            // Draw building interiors with polygon offset so exterior GfxObj wins at overlaps
+            // Draw building interiors with a smaller polygon offset than terrain (2,2) so floor wins over terrain at boundaries
             gl.Enable(EnableCap.PolygonOffsetFill);
-            gl.PolygonOffset(1f, 1f);
+            gl.PolygonOffset(0.5f, 0.5f);
             foreach (var (gpuKey, transforms) in _buildingCellGroupBuffer) {
                 if (transforms.Count == 0) continue;
                 if (!_gpuCache.TryGetValue(gpuKey, out var renderData)) continue;
@@ -846,10 +848,9 @@ namespace WorldBuilder.Editors.Landscape {
                 try {
                     batch.TextureArray.Bind(0);
                     _shader.SetUniform("uTextureArray", 0);
-                    // The shader reads texture index from vertex attribute location 7 (aTextureIndex),
-                    // NOT from a uniform. Use glVertexAttrib1f to set a constant value for all vertices
-                    // when no VBO is bound to that attribute. This is the same approach the shader expects.
-                    gl.DisableVertexAttribArray(7); // ensure no VBO is bound to location 7
+                    _shader.SetUniform("uTextureIndex", (float)batch.TextureIndex);
+                    // Shader reads texture layer from vertex attribute 7 (aTextureIndex). Set constant so we don't inherit stale value from static object draw.
+                    gl.DisableVertexAttribArray(7);
                     gl.VertexAttrib1((uint)7, (float)batch.TextureIndex);
                     gl.BindBuffer(GLEnum.ElementArrayBuffer, batch.IBO);
                     gl.DrawElementsInstanced(GLEnum.Triangles, (uint)batch.IndexCount, GLEnum.UnsignedShort, null, (uint)instanceTransforms.Count);
