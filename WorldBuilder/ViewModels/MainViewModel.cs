@@ -6,9 +6,11 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using WorldBuilder.Editors.Landscape.ViewModels;
 using WorldBuilder.Lib;
+using WorldBuilder.Lib.Docking;
 using WorldBuilder.Lib.Input;
 using WorldBuilder.Lib.Settings;
 using WorldBuilder.Views;
@@ -24,6 +26,17 @@ public partial class MainViewModel : ViewModelBase {
     public KeyGesture? ExitGesture => _inputManager.GetKeyGesture(InputActions.AppExit);
     public KeyGesture? GotoLandblockGesture => _inputManager.GetKeyGesture(InputActions.NavigationGoToLandblock);
 
+    // We expose a collection of dockable panels for the Windows menu
+    public IEnumerable<IDockable> DockingPanels {
+        get {
+            var landscapeEditor = ProjectManager.Instance.GetProjectService<LandscapeEditorViewModel>();
+            if (landscapeEditor != null) {
+                return landscapeEditor.DockingManager.AllPanels;
+            }
+            return new List<IDockable>();
+        }
+    }
+
     public MainViewModel() {
         _settings = new WorldBuilderSettings();
         _inputManager = new InputManager(_settings);
@@ -32,6 +45,16 @@ public partial class MainViewModel : ViewModelBase {
     public MainViewModel(WorldBuilderSettings settings) {
         _settings = settings;
         _inputManager = new InputManager(_settings);
+    }
+
+    [RelayCommand]
+    private void TogglePanelVisibility(object? parameter) {
+        if (parameter is string id) {
+             var landscapeEditor = ProjectManager.Instance.GetProjectService<LandscapeEditorViewModel>();
+             if (landscapeEditor != null) {
+                 landscapeEditor.DockingManager.TogglePanelVisibility(id);
+             }
+        }
     }
 
     [RelayCommand]
